@@ -46,7 +46,8 @@ VJA_copy/
 │   │   ├── typography_attack.py    # テキスト→画像タイポグラフィ攻撃(VJA/FigStep系の再現)
 │   │   ├── shape_obfuscation.py    # 文字の完全図形化(アウトライン/ベクター化)
 │   │   ├── variant_generator.py    # フォント・色・言語・サイズを変えたバリアント一括生成
-│   │   └── compare_optimize.py     # バリアント比較・最適化(OCR可読性×検知回避のパレート最適化)
+│   │   ├── compare_optimize.py     # バリアント比較・最適化(OCR可読性×検知回避のパレート最適化)
+│   │   └── adaptive_attack_optimizer.py  # 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming)
 │   ├── dataset/
 │   │   ├── iesbench_schema.py      # IESBench互換スキーマ(dataclass/JSON Schema)
 │   │   ├── dataset_optimizer.py    # データセット構築の最適化アルゴリズム(被覆率×多様性×難易度)
@@ -94,8 +95,11 @@ python -m src.dataset.build_dataset --n-target 200 --out data/sample/iesbench_li
 python -m src.defense.train_safety_dpo --config configs/dpo_default.yaml   # 要GPU
 python -m src.defense.train_guard_classifier --data data/sample/iesbench_like.jsonl
 
-# 5. 評価
+# 5. 評価(ASR/HS/EV/HRR に加え、良性コントロール群による FBR=過剰拒否率も算出)
 python -m src.eval.run_eval --dataset data/sample/iesbench_like.jsonl --defense introspective
+
+# 6. 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming)
+python -m src.attack.adaptive_attack_optimizer --guard-ckpt outputs/guard_classifier.pt --n-steps 40
 ```
 
 ## 4. ドキュメント一覧

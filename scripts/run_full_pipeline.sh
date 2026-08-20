@@ -36,7 +36,10 @@ python3 -m src.defense.train_safety_dpo \
 echo "== 5. Guard classifier 学習 =="
 python3 -m src.defense.train_guard_classifier --data data/sample/variants/manifest.jsonl --epochs 5
 
-echo "== 6. 評価(defense条件比較) =="
+echo "== 6. 評価(defense条件比較, FBR=過剰拒否率を含む) =="
 python3 -m src.eval.run_eval --dataset data/sample/iesbench_like.jsonl --compare-all --out outputs/eval_report.json
+
+echo "== 7. 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming) =="
+python3 -m src.attack.adaptive_attack_optimizer --guard-ckpt outputs/guard_classifier.pt --n-steps 40 --out outputs/adaptive_attack_report.json
 
 echo "完了。生成物は data/sample/ と outputs/ を参照してください。"
