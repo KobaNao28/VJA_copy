@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+outputs/
+data/sample/
+!data/sample/.gitkeep
+*.pt
+.pytest_cache/
+.DS_Store

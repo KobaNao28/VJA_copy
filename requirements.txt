@@ -1,0 +1,48 @@
+# === VJA 追実験・防御研究 環境依存関係 ===
+# Python 3.10+ を想定
+
+# --- コア ---
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+pillow>=10.2
+opencv-python-headless>=4.9
+tqdm>=4.66
+pyyaml>=6.0
+jsonlines>=4.0
+
+# --- 画像・フォント処理(タイポグラフィ攻撃/図形化) ---
+fonttools>=4.50
+freetype-py>=2.4
+svgwrite>=1.4
+svgpathtools>=1.6
+cairosvg>=2.7
+scikit-image>=0.22
+
+# --- OCR(可読性評価) ---
+pytesseract>=0.3.10
+easyocr>=1.7          # 多言語OCR比較用(任意)
+
+# --- 深層学習・VLM ---
+torch>=2.2
+torchvision>=0.17
+transformers>=4.44
+accelerate>=0.30
+peft>=0.11             # LoRA等 パラメータ効率ファインチューニング
+trl>=0.9               # DPOTrainer 等
+bitsandbytes>=0.43     # 量子化学習(任意, GPU環境)
+sentencepiece>=0.2.0
+open_clip_torch>=2.24  # CLIPベース類似度評価(画像最適化の目的関数)
+datasets>=2.19
+
+# --- 評価・可視化 ---
+scikit-learn>=1.4
+matplotlib>=3.8
+seaborn>=0.13
+
+# --- API経由でのVLM呼び出し(商用モデルでの追実験用, 任意) ---
+openai>=1.30
+anthropic>=0.34
+
+# --- テスト ---
+pytest>=8.0
