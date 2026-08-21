@@ -89,3 +89,8 @@
 
 これらは `docs/02_attack_enhancement_proposals.md` および `docs/03_defense_survey.md` で
 攻撃強化・防御双方の設計の参照点として扱う。
+
+画像編集モデル以外(GUIエージェント、動画理解モデル、マルチ画像文脈、
+Vision-Language-Actionロボティクス等)への"visual-to-visual"攻撃構造の一般化と、
+それぞれの領域での関連研究(PopupAttack, TempJail, SIVA/MIDAS, VLA-Hijack等)は
+`docs/08_visual_to_visual_threat_expansion.md` にまとめている。
