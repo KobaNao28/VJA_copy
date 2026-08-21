@@ -15,6 +15,16 @@ from src.dataset.lexicon_optimizer import ThreatLexicon, build_lexicon
 from src.attack.visual_instruction_attack import VisualInstructionSpec, render_visual_instruction
 from src.defense.mark_detector import MarkDetectorCNN, detect_marks
 from src.defense.introspective_defense import make_mark_aware_reasoning_fn
+from src.attack.ui_injection_attack import UIInjectionSpec, render_ui_injection
+from src.defense.ui_injection_detector import UIInjectionDetectorCNN, detect_ui_injection
+from src.attack.temporal_trajectory_attack import TrajectorySpec, render_frame_sequence, save_frame_sequence
+from src.defense.trajectory_detector import (
+    GESTURE_CLASSES,
+    TrajectoryClassifierMLP,
+    extract_centroid,
+    naive_single_frame_flag,
+    sequence_to_feature_vector,
+)
 from src.eval.metrics import EvalRecord, aggregate_metrics
 
 
@@ -186,3 +196,64 @@ def test_mark_aware_reasoning_flags_unjustified_visual_instruction() -> None:
     # マークが検出されない場合は通常のキーワード判定にフォールバックする
     allowed2, _, _ = fn("Please edit the image as marked.", "画像内に明示的な視覚指示は検出されなかった")
     assert allowed2 is True
+
+
+def test_ui_injection_attack_and_detector(tmp_path: Path) -> None:
+    spec_injected = UIInjectionSpec(dialog_style="modal_center", injected=True, seed=0)
+    img_injected, meta_injected = render_ui_injection(spec_injected)
+    assert meta_injected["injected"] is True
+    assert meta_injected["dialog_bbox"] is not None
+
+    spec_clean = UIInjectionSpec(injected=False, seed=1)
+    img_clean, meta_clean = render_ui_injection(spec_clean)
+    assert meta_clean["injected"] is False
+    assert meta_clean["dialog_bbox"] is None
+
+    injected_path, clean_path = tmp_path / "injected.png", tmp_path / "clean.png"
+    img_injected.save(injected_path)
+    img_clean.save(clean_path)
+
+    model = UIInjectionDetectorCNN()  # 未学習の初期重みでも配線のみ検証
+    for path in (injected_path, clean_path):
+        result = detect_ui_injection(model, str(path))
+        assert isinstance(result["injected"], bool)
+        assert 0.0 <= result["confidence"] <= 1.0
+
+
+def test_temporal_trajectory_single_frame_is_ambiguous(tmp_path: Path) -> None:
+    """単一フレームだけでは attack(意味のある軌跡)と benign(ランダムな動き)を
+    区別できない、という本モジュールの核心的主張をユニットテストとして固定する。"""
+    semantic_spec = TrajectorySpec(gesture_type="arrow_sweep", n_frames=8, seed=0)
+    benign_spec = TrajectorySpec(gesture_type="random_noise", n_frames=8, seed=0)
+
+    sem_frames, sem_meta = render_frame_sequence(semantic_spec)
+    ben_frames, ben_meta = render_frame_sequence(benign_spec)
+    assert sem_meta["is_semantic"] is True
+    assert ben_meta["is_semantic"] is False
+
+    sem_paths = save_frame_sequence(sem_frames, tmp_path / "semantic")
+    ben_paths = save_frame_sequence(ben_frames, tmp_path / "benign")
+
+    # 素朴な単一フレーム基準は両方とも「マーカーあり」としてしか判定できない
+    assert all(naive_single_frame_flag(p) for p in sem_paths)
+    assert all(naive_single_frame_flag(p) for p in ben_paths)
+
+    # 座標の重心抽出自体は機能する
+    assert extract_centroid(sem_paths[0]) is not None
+
+
+def test_trajectory_classifier_feature_shapes(tmp_path: Path) -> None:
+    spec = TrajectorySpec(gesture_type="circle_then_tap", n_frames=8, seed=2)
+    frames, _ = render_frame_sequence(spec)
+    paths = save_frame_sequence(frames, tmp_path / "seq")
+
+    feat = sequence_to_feature_vector(paths, n_frames=8, canvas_size=spec.canvas_size)
+    assert feat.shape == (8 * 2 + 3,)
+
+    model = TrajectoryClassifierMLP(n_frames=8)  # 未学習でも配線のみ検証
+    import torch
+
+    x = torch.tensor(feat, dtype=torch.float32).unsqueeze(0)
+    sem_logit, ges_logit = model(x)
+    assert sem_logit.shape == (1,)
+    assert ges_logit.shape == (1, len(GESTURE_CLASSES))

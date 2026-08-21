@@ -43,6 +43,7 @@ VJA_copy/
 │   ├── 05_reproduction_guide.md    # 追実験の具体的手順書
 │   ├── 06_novel_defense_proposals.md  # 新規研究提案: Curriculum DPO / 脅威語彙 / Attack Immune Memory
 │   ├── 07_vja_faithful_defense_gap.md  # VJA本来の脅威モデル(非テキスト視覚指示)への適用性検証
+│   ├── 08_visual_to_visual_threat_expansion.md  # Visual-to-Visual攻撃の拡張: 時系列軌跡・GUI注入等
 │   └── templates/guideline_template.md  # 統一学習ガイドラインのコピー用テンプレート
 ├── src/
 │   ├── attack/
@@ -52,7 +53,11 @@ VJA_copy/
 │   │   ├── compare_optimize.py     # バリアント比較・最適化(OCR可読性×検知回避のパレート最適化)
 │   │   ├── adaptive_attack_optimizer.py  # 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming)
 │   │   ├── visual_instruction_attack.py  # VJA本来の"visual-to-visual"攻撃(文字を伴わない矢印・丸囲み等)
-│   │   └── mark_variant_generator.py     # 非テキスト視覚指示バリアントの一括生成
+│   │   ├── mark_variant_generator.py     # 非テキスト視覚指示バリアントの一括生成
+│   │   ├── ui_injection_attack.py        # GUI/エージェント・ハイジャック攻撃(偽ダイアログ注入)
+│   │   ├── ui_injection_variant_generator.py
+│   │   ├── temporal_trajectory_attack.py # 時系列軌跡エンコーディング攻撃(動画フレーム列)
+│   │   └── trajectory_variant_generator.py
 │   ├── dataset/
 │   │   ├── iesbench_schema.py      # IESBench互換スキーマ(dataclass/JSON Schema)
 │   │   ├── dataset_optimizer.py    # データセット構築の最適化アルゴリズム(被覆率×多様性×難易度)
@@ -64,6 +69,8 @@ VJA_copy/
 │   │   ├── train_guard_classifier.py # 画像+テキスト Jailbreak検知器の学習
 │   │   ├── introspective_defense.py  # training-free「内省的マルチモーダル推論」防御の再現
 │   │   ├── mark_detector.py          # 非テキスト視覚指示(矢印・丸囲み等)の学習型検出器
+│   │   ├── ui_injection_detector.py  # GUI注入(偽ダイアログ)の学習型検出器
+│   │   ├── trajectory_detector.py    # 時系列軌跡エンコーディング攻撃の検出器
 │   │   ├── immune_memory_defense.py  # Attack Immune Memory: 免疫記憶型防御(新規提案)
 │   │   └── unified_defense_pipeline.py # 上記を多層防御として統合するランタイム
 │   ├── eval/
@@ -132,6 +139,7 @@ python -m src.defense.immune_memory_defense --guard-ckpt outputs/guard_classifie
 - [`docs/05_reproduction_guide.md`](docs/05_reproduction_guide.md) — 追実験の具体的手順
 - [`docs/06_novel_defense_proposals.md`](docs/06_novel_defense_proposals.md) — 新規研究提案(Curriculum DPO / 脅威語彙データセット / Attack Immune Memory)
 - [`docs/07_vja_faithful_defense_gap.md`](docs/07_vja_faithful_defense_gap.md) — VJA本来の脅威モデル(非テキスト視覚指示)への防御適用性の検証(検知率0%→92.3%の実証)
+- [`docs/08_visual_to_visual_threat_expansion.md`](docs/08_visual_to_visual_threat_expansion.md) — Visual-to-Visual攻撃の拡張(時系列軌跡エンコーディング・GUI/エージェント・ハイジャック)の実装と実証
 
 ## 5. ライセンス・出典
 
