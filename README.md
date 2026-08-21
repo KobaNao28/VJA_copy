@@ -15,14 +15,17 @@
 
 ## 1. 追実験に必要なもの(チェックリスト)
 
-詳細は [`docs/05_reproduction_guide.md`](docs/05_reproduction_guide.md) を参照してください。要点のみ:
+詳細は [`docs/05_reproduction_guide.md`](docs/05_reproduction_guide.md) を、
+必要リソースの実測値(VRAM/ディスク容量/データセットサイズ/実行時間)は
+[`docs/09_resource_requirements.md`](docs/09_resource_requirements.md) を参照してください。要点のみ:
 
 | 区分 | 内容 |
 |---|---|
-| データセット | IESBench (1,054 画像 / 15 safety policy / 116 attributes / 9 actions)。公式配布は Hugging Face `CSU-JPG/IESBench`。本リポジトリでは **スキーマ互換のサンプル生成器** (`src/dataset/`) を同梱し、実データがなくてもパイプラインを検証可能 |
+| データセット | IESBench (1,054 画像 / 15 safety policy / 116 attributes / 9 actions)。公式配布は Hugging Face `CSU-JPG/IESBench`。本リポジトリでは **スキーマ互換のサンプル生成器** (`src/dataset/`) を同梱し、実データがなくてもパイプラインを検証可能(外部データセットのダウンロードは一切不要、詳細は`docs/09`) |
 | 対象モデル | 画像編集VLM: Qwen-Image-Edit, Seedream, GPT-Image-1(.5), Nano Banana / Nano Banana Pro 等(API or 重みが必要) |
-| 計算資源 | 攻撃生成自体はCPUで可。ローカルOSSモデルでの評価・防御学習はGPU(できればVRAM 24GB以上)推奨 |
-| 評価指標 | ASR (Attack Success Rate) / HS (Harmfulness Score 1–5) / EV (Editing Validity) / HRR (High Risk Ratio) — `src/eval/metrics.py` に実装 |
+| 計算資源(GPU/VRAM) | **既定の全パイプライン(攻撃生成・データセット構築・防御学習・評価)はGPU不要、CPUのみで動作**(本リポジトリの学習コードは全てCPUで動作確認済み)。`train_safety_dpo.py --model-name <実モデル>` で実VLMをLoRA微調整する場合のみGPU推奨(モデル規模により6〜32GB、詳細は`docs/09`) |
+| ディスク容量 | 依存関係込みで約1.5〜2GB(CPU専用torch)。生成データ・チェックポイントは数十MB程度(実測値は`docs/09`) |
+| 評価指標 | ASR (Attack Success Rate) / HS (Harmfulness Score 1–5) / EV (Editing Validity) / HRR (High Risk Ratio) / FBR (False Block Rate) — `src/eval/metrics.py` に実装 |
 | ライブラリ | `requirements.txt` 参照(画像・フォント処理、OCR、Transformers/TRL(DPO)、CLIP 等) |
 | 判定用モデル | HS/EVのLLM-as-judge用に GPT-4級 or Claude 級 VLM への API アクセス(任意。ローカルjudgeモデルでも代替可) |
 
@@ -44,6 +47,7 @@ VJA_copy/
 │   ├── 06_novel_defense_proposals.md  # 新規研究提案: Curriculum DPO / 脅威語彙 / Attack Immune Memory
 │   ├── 07_vja_faithful_defense_gap.md  # VJA本来の脅威モデル(非テキスト視覚指示)への適用性検証
 │   ├── 08_visual_to_visual_threat_expansion.md  # Visual-to-Visual攻撃の拡張: 時系列軌跡・GUI注入等
+│   ├── 09_resource_requirements.md  # 実行環境要件: VRAM・ディスク容量・データセット(実測値)
 │   └── templates/guideline_template.md  # 統一学習ガイドラインのコピー用テンプレート
 ├── src/
 │   ├── attack/
@@ -140,6 +144,7 @@ python -m src.defense.immune_memory_defense --guard-ckpt outputs/guard_classifie
 - [`docs/06_novel_defense_proposals.md`](docs/06_novel_defense_proposals.md) — 新規研究提案(Curriculum DPO / 脅威語彙データセット / Attack Immune Memory)
 - [`docs/07_vja_faithful_defense_gap.md`](docs/07_vja_faithful_defense_gap.md) — VJA本来の脅威モデル(非テキスト視覚指示)への防御適用性の検証(検知率0%→92.3%の実証)
 - [`docs/08_visual_to_visual_threat_expansion.md`](docs/08_visual_to_visual_threat_expansion.md) — Visual-to-Visual攻撃の拡張(時系列軌跡エンコーディング・GUI/エージェント・ハイジャック)の実装と実証
+- [`docs/09_resource_requirements.md`](docs/09_resource_requirements.md) — 実行環境要件(VRAM・ディスク容量・データセット・実行時間の実測値)
 
 ## 5. ライセンス・出典
 
