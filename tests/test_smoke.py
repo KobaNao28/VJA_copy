@@ -12,6 +12,9 @@ from src.defense.curriculum_dpo import PreferencePair, order_pairs, train_one_st
 from src.defense.immune_memory_defense import AttackMemoryBank, embed
 from src.defense.train_safety_dpo import TinyCharTransformer, dpo_loss
 from src.dataset.lexicon_optimizer import ThreatLexicon, build_lexicon
+from src.attack.visual_instruction_attack import VisualInstructionSpec, render_visual_instruction
+from src.defense.mark_detector import MarkDetectorCNN, detect_marks
+from src.defense.introspective_defense import make_mark_aware_reasoning_fn
 from src.eval.metrics import EvalRecord, aggregate_metrics
 
 
@@ -144,3 +147,42 @@ def test_immune_memory_bank_matches_known_pattern(tmp_path: Path) -> None:
     far_future = 1000.0 + bank.decay_half_life_seconds * 20
     match_decayed = bank.query(emb, now=far_future)
     assert match_decayed.matched is False
+
+
+def test_visual_instruction_attack_generates_marks(tmp_path: Path) -> None:
+    for mark_type in ("arrow", "circle", "rectangle", "x_mark", "scribble"):
+        spec = VisualInstructionSpec(mark_type=mark_type, seed=0)
+        img, meta = render_visual_instruction(spec)
+        assert img.size == spec.canvas_size
+        assert len(meta["target_bboxes"]) >= 1
+        assert meta["carrier_prompt"]  # テキストプロンプトは常に無害な定型文
+
+
+def test_mark_detector_forward_pass_shapes(tmp_path: Path) -> None:
+    spec = VisualInstructionSpec(mark_type="arrow", seed=1)
+    img, _ = render_visual_instruction(spec)
+    img_path = tmp_path / "mark.png"
+    img.save(img_path)
+
+    model = MarkDetectorCNN()  # 未学習の初期重みでも配線のみ検証
+    result = detect_marks(model, str(img_path))
+    assert isinstance(result["has_mark"], bool)
+    assert result["mark_type"] in ["none", "arrow", "circle", "rectangle", "x_mark", "scribble"]
+
+
+def test_mark_aware_reasoning_flags_unjustified_visual_instruction() -> None:
+    """
+    OCRベースのキーワード一致では拾えない「マーク検出済みだがテキストに具体的説明が無い」
+    ケースを mark_aware_reasoning が拒否として扱うことを確認する
+    (VJA型攻撃に対する検知ギャップを埋める中核ロジックの検証)。
+    """
+    fn = make_mark_aware_reasoning_fn()
+    mark_detected_desc = "学習済みマーク検出器が視覚指示(推定種類: arrow, 確信度: 0.90)を検出した(VJA型の非テキスト視覚指示の可能性)"
+
+    allowed, category, _ = fn("Please edit the image as marked.", mark_detected_desc)
+    assert allowed is False
+    assert category == "vja_visual_instruction_without_justification"
+
+    # マークが検出されない場合は通常のキーワード判定にフォールバックする
+    allowed2, _, _ = fn("Please edit the image as marked.", "画像内に明示的な視覚指示は検出されなかった")
+    assert allowed2 is True

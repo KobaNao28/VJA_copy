@@ -42,14 +42,17 @@ VJA_copy/
 │   ├── 04_ideal_dataset_design.md  # Jailbreak防御用「理想的データセット」設計 + 統一ガイドライン
 │   ├── 05_reproduction_guide.md    # 追実験の具体的手順書
 │   ├── 06_novel_defense_proposals.md  # 新規研究提案: Curriculum DPO / 脅威語彙 / Attack Immune Memory
+│   ├── 07_vja_faithful_defense_gap.md  # VJA本来の脅威モデル(非テキスト視覚指示)への適用性検証
 │   └── templates/guideline_template.md  # 統一学習ガイドラインのコピー用テンプレート
 ├── src/
 │   ├── attack/
-│   │   ├── typography_attack.py    # テキスト→画像タイポグラフィ攻撃(VJA/FigStep系の再現)
+│   │   ├── typography_attack.py    # テキスト→画像タイポグラフィ攻撃(FigStep/MM-SafetyBench系の再現)
 │   │   ├── shape_obfuscation.py    # 文字の完全図形化(アウトライン/ベクター化)
 │   │   ├── variant_generator.py    # フォント・色・言語・サイズを変えたバリアント一括生成
 │   │   ├── compare_optimize.py     # バリアント比較・最適化(OCR可読性×検知回避のパレート最適化)
-│   │   └── adaptive_attack_optimizer.py  # 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming)
+│   │   ├── adaptive_attack_optimizer.py  # 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming)
+│   │   ├── visual_instruction_attack.py  # VJA本来の"visual-to-visual"攻撃(文字を伴わない矢印・丸囲み等)
+│   │   └── mark_variant_generator.py     # 非テキスト視覚指示バリアントの一括生成
 │   ├── dataset/
 │   │   ├── iesbench_schema.py      # IESBench互換スキーマ(dataclass/JSON Schema)
 │   │   ├── dataset_optimizer.py    # データセット構築の最適化アルゴリズム(被覆率×多様性×難易度)
@@ -60,11 +63,13 @@ VJA_copy/
 │   │   ├── curriculum_dpo.py       # DPO選好ペアの提示順序(カリキュラム)比較実験(新規提案)
 │   │   ├── train_guard_classifier.py # 画像+テキスト Jailbreak検知器の学習
 │   │   ├── introspective_defense.py  # training-free「内省的マルチモーダル推論」防御の再現
+│   │   ├── mark_detector.py          # 非テキスト視覚指示(矢印・丸囲み等)の学習型検出器
 │   │   ├── immune_memory_defense.py  # Attack Immune Memory: 免疫記憶型防御(新規提案)
 │   │   └── unified_defense_pipeline.py # 上記を多層防御として統合するランタイム
 │   ├── eval/
 │   │   ├── metrics.py              # ASR/HS/EV/HRR
-│   │   └── run_eval.py             # 攻撃×防御の一括評価CLI
+│   │   ├── run_eval.py             # 攻撃×防御の一括評価CLI
+│   │   └── vja_gap_eval.py         # テキスト攻撃 vs VJA型視覚指示攻撃での検知率比較
 │   └── utils/
 │       ├── io_utils.py
 │       └── seed.py
@@ -126,6 +131,7 @@ python -m src.defense.immune_memory_defense --guard-ckpt outputs/guard_classifie
 - [`docs/04_ideal_dataset_design.md`](docs/04_ideal_dataset_design.md) — 理想的な安全データセット設計・統一ガイドライン
 - [`docs/05_reproduction_guide.md`](docs/05_reproduction_guide.md) — 追実験の具体的手順
 - [`docs/06_novel_defense_proposals.md`](docs/06_novel_defense_proposals.md) — 新規研究提案(Curriculum DPO / 脅威語彙データセット / Attack Immune Memory)
+- [`docs/07_vja_faithful_defense_gap.md`](docs/07_vja_faithful_defense_gap.md) — VJA本来の脅威モデル(非テキスト視覚指示)への防御適用性の検証(検知率0%→92.3%の実証)
 
 ## 5. ライセンス・出典
 
