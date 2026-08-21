@@ -5,6 +5,7 @@
 
 設計方針(docs/03_defense_survey.md の「多層防御・スイスチーズモデル」節に対応):
   単一の防御層は必ず突破されうるという前提に立ち、
+    Layer 0: Attack Immune Memory(任意)で既知の検知回避パターンと高速照合(immune_memory_defense.py)
     Layer 1: 軽量 guard classifier で明らかに攻撃的なバリアントを高速に足切り
     Layer 2: introspective defense でテキスト空間に持ち込んだ上で安全性判定
     Layer 3: セッション全体の累積リスクスコアで、単発では無害でも
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 
 import torch
 
+from src.defense.immune_memory_defense import AttackMemoryBank, embed
 from src.defense.introspective_defense import IntrospectiveDefense, ReasoningFn
 from src.defense.train_guard_classifier import GuardClassifier, load_image_tensor
 
@@ -55,11 +57,15 @@ class UnifiedDefensePipeline:
         guard_threshold: float = 0.5,
         reasoning_fn: ReasoningFn | None = None,
         session_risk_threshold: float = 1.5,
+        memory_bank: AttackMemoryBank | None = None,
     ):
         self.guard_model = guard_model
         self.guard_threshold = guard_threshold
         self.introspective = IntrospectiveDefense(reasoning_fn=reasoning_fn)
         self.risk_tracker = SessionRiskTracker(threshold=session_risk_threshold)
+        # Layer 0: Attack Immune Memory(任意)。guard_modelの特徴抽出器を流用するため
+        # guard_modelが無いと埋め込みが作れず、その場合はこの層はスキップされる。
+        self.memory_bank = memory_bank
 
     def _guard_score(self, image_path: str, prompt: str) -> float:
         if self.guard_model is None:
@@ -71,6 +77,20 @@ class UnifiedDefensePipeline:
             return torch.sigmoid(logit).item()
 
     def process(self, session_id: str, image_path: str, prompt: str) -> UnifiedVerdict:
+        # Layer 0: Attack Immune Memory(既知の検知回避パターンとの高速照合)
+        if self.memory_bank is not None and self.guard_model is not None:
+            query_emb = embed(self.guard_model, image_path, prompt)
+            match = self.memory_bank.query(query_emb)
+            if match.matched:
+                risk = self.risk_tracker.update(session_id, 1.0)
+                booster_note = "(booster再学習を推奨: 同カテゴリへの反復曝露を検出)" if match.booster_retrain_needed else ""
+                return UnifiedVerdict(
+                    allowed=False,
+                    layer_triggered="immune_memory",
+                    rationale=f"既知の検知回避パターン(category={match.category})と類似度{match.best_similarity}で一致 {booster_note}",
+                    session_risk_score=risk,
+                )
+
         # Layer 1: guard classifier
         guard_score = self._guard_score(image_path, prompt)
         if guard_score >= self.guard_threshold:

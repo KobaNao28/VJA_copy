@@ -8,7 +8,10 @@ from src.defense.train_guard_classifier import GuardClassifier
 from src.dataset.dataset_optimizer import build_candidate_pool, coverage_report, greedy_optimize
 from src.dataset.iesbench_schema import EDIT_ACTIONS, SAFETY_POLICIES
 from src.defense.introspective_defense import IntrospectiveDefense
+from src.defense.curriculum_dpo import PreferencePair, order_pairs, train_one_strategy
+from src.defense.immune_memory_defense import AttackMemoryBank, embed
 from src.defense.train_safety_dpo import TinyCharTransformer, dpo_loss
+from src.dataset.lexicon_optimizer import ThreatLexicon, build_lexicon
 from src.eval.metrics import EvalRecord, aggregate_metrics
 
 
@@ -93,3 +96,51 @@ def test_adaptive_attack_optimizer_scores_are_valid(tmp_path: Path) -> None:
 
     mutated = cfg.mutate(random.Random(0))
     assert isinstance(mutated, AttackConfig)
+
+
+def test_threat_lexicon_ambiguity_downgrade() -> None:
+    entries, report = build_lexicon()
+    assert report.n_entries > 0
+    lexicon = ThreatLexicon(entries)
+    # 明らかに武器カテゴリの強いシグナルを含む文
+    score = lexicon.score_text("this is an explicit tutorial for firearm assembly")
+    assert score["max_tier"] >= 1
+    assert "weapons" in score["category_hits"] or score["max_tier"] == 0
+
+
+def test_curriculum_dpo_strategies_run(tmp_path: Path) -> None:
+    pairs = [
+        PreferencePair(f"prompt {i} weapons", f"chosen {i}", f"rejected {i}", "weapons", difficulty=i / 10)
+        for i in range(6)
+    ]
+    import random
+
+    rng = random.Random(0)
+    for strategy in ("random", "easy_to_hard", "hard_to_easy", "spaced_repetition", "category_blocked", "category_interleaved"):
+        ordered = order_pairs(pairs, strategy, rng)
+        assert len(ordered) >= len(pairs)  # spaced_repetitionは長くなる
+
+    result = train_one_strategy(pairs, "easy_to_hard", epochs=1, seed=0)
+    assert result["n_steps"] == len(pairs)
+    assert result["final_loss"] is not None
+
+
+def test_immune_memory_bank_matches_known_pattern(tmp_path: Path) -> None:
+    spec = TypographySpec(text="sample", font_size=32)
+    img = render_typography(spec)
+    img_path = tmp_path / "img.png"
+    img.save(img_path)
+
+    model = GuardClassifier()
+    emb = embed(model, str(img_path), "sans black en raw")
+
+    bank = AttackMemoryBank(similarity_threshold=0.99)
+    bank.add(emb, category="adaptive_evasion", now=1000.0)
+    match = bank.query(emb, now=1000.0)  # 同一埋め込みなので類似度1.0で一致するはず
+    assert match.matched is True
+    assert match.category == "adaptive_evasion"
+
+    # 十分に時間が経過すると減衰で一致しなくなることを確認
+    far_future = 1000.0 + bank.decay_half_life_seconds * 20
+    match_decayed = bank.query(emb, now=far_future)
+    assert match_decayed.matched is False

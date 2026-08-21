@@ -40,7 +40,9 @@ VJA_copy/
 │   ├── 02_attack_enhancement_proposals.md  # 攻撃強化の技術的方向性(防御設計目的)
 │   ├── 03_defense_survey.md        # DPO等 一般的安全アライメント手法サーベイと弱点・改善案
 │   ├── 04_ideal_dataset_design.md  # Jailbreak防御用「理想的データセット」設計 + 統一ガイドライン
-│   └── 05_reproduction_guide.md    # 追実験の具体的手順書
+│   ├── 05_reproduction_guide.md    # 追実験の具体的手順書
+│   ├── 06_novel_defense_proposals.md  # 新規研究提案: Curriculum DPO / 脅威語彙 / Attack Immune Memory
+│   └── templates/guideline_template.md  # 統一学習ガイドラインのコピー用テンプレート
 ├── src/
 │   ├── attack/
 │   │   ├── typography_attack.py    # テキスト→画像タイポグラフィ攻撃(VJA/FigStep系の再現)
@@ -51,11 +53,14 @@ VJA_copy/
 │   ├── dataset/
 │   │   ├── iesbench_schema.py      # IESBench互換スキーマ(dataclass/JSON Schema)
 │   │   ├── dataset_optimizer.py    # データセット構築の最適化アルゴリズム(被覆率×多様性×難易度)
-│   │   └── build_dataset.py        # 上記を用いたサンプルデータセット構築CLI
+│   │   ├── build_dataset.py        # 上記を用いたサンプルデータセット構築CLI
+│   │   └── lexicon_optimizer.py    # 3段階脅威度の単語レベル語彙データセット+最適化(新規提案)
 │   ├── defense/
 │   │   ├── train_safety_dpo.py     # マルチモーダルDPOによる安全アライメント学習
+│   │   ├── curriculum_dpo.py       # DPO選好ペアの提示順序(カリキュラム)比較実験(新規提案)
 │   │   ├── train_guard_classifier.py # 画像+テキスト Jailbreak検知器の学習
 │   │   ├── introspective_defense.py  # training-free「内省的マルチモーダル推論」防御の再現
+│   │   ├── immune_memory_defense.py  # Attack Immune Memory: 免疫記憶型防御(新規提案)
 │   │   └── unified_defense_pipeline.py # 上記を多層防御として統合するランタイム
 │   ├── eval/
 │   │   ├── metrics.py              # ASR/HS/EV/HRR
@@ -92,14 +97,24 @@ python -m src.attack.compare_optimize --variants-dir data/sample/variants --out 
 python -m src.dataset.build_dataset --n-target 200 --out data/sample/iesbench_like.jsonl
 
 # 4. 防御学習(DPO / guard classifier / introspective defense)
-python -m src.defense.train_safety_dpo --config configs/dpo_default.yaml   # 要GPU
-python -m src.defense.train_guard_classifier --data data/sample/iesbench_like.jsonl
+python -m src.defense.train_safety_dpo --build-from-iesbench data/sample/iesbench_like.jsonl \
+    --data data/sample/dpo_preferences.jsonl --mock --epochs 5   # --mock無しなら --model-name <実モデルID> (要GPU)
+python -m src.defense.train_guard_classifier --data data/sample/variants/manifest.jsonl
 
 # 5. 評価(ASR/HS/EV/HRR に加え、良性コントロール群による FBR=過剰拒否率も算出)
 python -m src.eval.run_eval --dataset data/sample/iesbench_like.jsonl --defense introspective
 
 # 6. 学習済みguard classifierに対する適応的攻撃再最適化(closed-loop red teaming)
 python -m src.attack.adaptive_attack_optimizer --guard-ckpt outputs/guard_classifier.pt --n-steps 40
+
+# 7. [新規提案] 3段階脅威語彙データセットの構築
+python -m src.dataset.lexicon_optimizer --out data/sample/threat_lexicon.json
+
+# 8. [新規提案] Curriculum DPO: 選好ペアの提示順序を比較
+python -m src.defense.curriculum_dpo --data data/sample/dpo_preferences.jsonl --epochs 3
+
+# 9. [新規提案] Attack Immune Memory: 検知回避パターンを記憶し高速照合
+python -m src.defense.immune_memory_defense --guard-ckpt outputs/guard_classifier.pt --n-steps 30
 ```
 
 ## 4. ドキュメント一覧
@@ -110,6 +125,7 @@ python -m src.attack.adaptive_attack_optimizer --guard-ckpt outputs/guard_classi
 - [`docs/03_defense_survey.md`](docs/03_defense_survey.md) — DPO等の一般的安全アライメント手法サーベイ・弱点・改善案
 - [`docs/04_ideal_dataset_design.md`](docs/04_ideal_dataset_design.md) — 理想的な安全データセット設計・統一ガイドライン
 - [`docs/05_reproduction_guide.md`](docs/05_reproduction_guide.md) — 追実験の具体的手順
+- [`docs/06_novel_defense_proposals.md`](docs/06_novel_defense_proposals.md) — 新規研究提案(Curriculum DPO / 脅威語彙データセット / Attack Immune Memory)
 
 ## 5. ライセンス・出典
 

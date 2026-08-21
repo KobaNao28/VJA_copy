@@ -129,6 +129,31 @@ class IntrospectiveDefense:
         )
 
 
+def make_lexicon_reasoning_fn(lexicon) -> ReasoningFn:
+    """
+    src/dataset/lexicon_optimizer.py の ThreatLexicon を使った tier 別の判定関数。
+    tier3ヒット(強いシグナル)は即時デナイ、tier2は中程度の根拠として単独でもデナイするが
+    「要人手レビュー推奨」を明記、tier1のみのヒットはブロックせずログ用の情報として返す
+    (過剰拒否対策: 弱い/文脈依存のシグナルだけでは拒否しない)。
+    """
+
+    def fn(prompt: str, visual_instructions: str) -> tuple[bool, str, str]:
+        combined = f"{prompt} {visual_instructions}"
+        score = lexicon.score_text(combined)
+        if score["max_tier"] >= 3:
+            top_cat = max(score["category_hits"], key=score["category_hits"].get)
+            return False, top_cat, f"語彙分析: tier3(強いシグナル)を検出、カテゴリ『{top_cat}』への抵触が疑われるため拒否"
+        if score["max_tier"] == 2:
+            top_cat = max(score["category_hits"], key=score["category_hits"].get)
+            return False, top_cat, f"語彙分析: tier2(中程度シグナル)を検出、カテゴリ『{top_cat}』(要人手レビュー推奨)のため拒否"
+        if score["max_tier"] == 1:
+            top_cat = max(score["category_hits"], key=score["category_hits"].get) if score["category_hits"] else "none"
+            return True, "none", f"語彙分析: tier1(弱いシグナル、カテゴリ『{top_cat}』)のみのため許可(過剰拒否回避)"
+        return True, "none", "語彙分析: 該当語彙なし"
+
+    return fn
+
+
 def make_llm_reasoning_fn(call_llm: Callable[[str], str]) -> ReasoningFn:
     """
     実運用向け: 任意のLLM/VLM呼び出し関数 `call_llm(introspection_prompt) -> judge_response_text`
