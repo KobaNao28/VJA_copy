@@ -6,6 +6,14 @@
 本リポジトリの全パイプラインはGPU無し・CPUのみで動作する**(既定の`--mock`や
 他の学習スクリプトはいずれもCPU専用で、`.cuda()`は一切呼ばれない)。
 
+> **本セッションでの外部データセット/重みの準備について**: IESBench本体・
+> Qwen-Image-Edit重み・代替の実写データセット(COCO等)はいずれも
+> `huggingface.co`/`modelscope.cn`/`zenodo.org`/`cocodataset.org`等でのみ配布されており、
+> これらは本セッションの組織egressポリシーにより明示的にブロックされている
+> (`curl`で直接疎通確認済み、403応答。ポリシー上リトライ・回避は行っていない)。
+> **そのためこのセッション内では外部データセットを準備できなかった**。
+> 3.2節に、ユーザー自身の環境で実行できる正確な入手手順・引用情報をまとめた。
+
 ## 1. VRAM(GPU)要件
 
 | 実行対象 | GPU要否 | 目安VRAM |
@@ -28,6 +36,10 @@
 | 7B〜8B(例: Qwen2-VL-7B, LLaVA-7B相当) | 16〜20GB | 60GB超 |
 | 13B前後 | 24〜32GB | 100GB超 |
 
+- **この表は一般的なテキスト生成LLM/VLM(数B〜十数Bパラメータ)を想定した目安であり、
+  VJA論文が実際に対象とする `Qwen/Qwen-Image-Edit`(約20Bパラメータ級の拡散モデル)には
+  適用できない**。実モデル・データセットの詳細な調査結果(公式リポジトリの
+  `requirements.txt`確認、正確なBibTeX等)は3.2節にまとめた。
 - `requirements.txt` に含まれる `bitsandbytes` で4bit/8bit量子化すれば、上記目安の
   概ね半分〜1/4程度まで削減可能(精度とのトレードオフに注意)。
 - **重要な既知の制約**: 現在の `train_safety_dpo.py::build_hf_policy_and_ref()` は
@@ -101,7 +113,8 @@
 | + Python依存関係(CPU専用torch) | 約1.5〜2GB |
 | + Python依存関係(CUDA版torch、GPU環境向け) | 約4.9GB |
 | + 本ドキュメントに記載の全パイプラインをデフォルト設定でフル実行 | 上記 + 約40MB |
-| + 実IESBenchデータセット(下記3節) | 上記 + 数百MB〜数GB(公式配布のサイズに依存、未確認) |
+| + 実IESBenchデータセット(下記3.2節、本セッションでは未取得) | 上記 + 数百MB〜1GB程度(未確認) |
+| + Qwen-Image-Edit本体の重み(実モデルでの追実験、本セッションでは未取得) | 上記 + **数十GB規模**(20Bパラメータ級、fp16で概算約40GB、未確認) |
 
 ## 3. データセット要件
 
@@ -118,20 +131,97 @@
 - 3段階脅威語彙データセット(`lexicon_optimizer.py`、内蔵のseed語彙から構築)
 - DPO選好データ(`train_safety_dpo.py --build-from-iesbench`、上記の合成データセットから自動合成)
 
-### 3.2 外部データセット(任意、実追実験の場合のみ必要)
+### 3.2 外部データセット・重みの取得を試みた結果(本セッションでの実地検証)
 
-| データセット | 用途 | 入手方法 | 本リポジトリでの必須度 |
-|---|---|---|---|
-| **IESBench**(公式, `CSU-JPG/IESBench`) | VJA論文の数値を厳密に再現する場合 | Hugging Face(要申請/規約確認、本セッションからはアクセス不可) | 任意。`src/dataset/iesbench_schema.py::load_entries()` が公式JSON形式をそのまま読み込める設計のため、入手できれば即座に差し替え可能 |
-| 実写ベースの背景画像(mark_detector/ui_injection_detector/trajectory_detectorの本番学習用) | 本番相当の汎化性能を検証する場合 | 任意の画像データセット(COCO等) | 任意。現状は完全合成シーンで代替しており、`docs/07`/`docs/08` に記載の通りトイスケールでの機構検証に留まる |
-| 対象VLM/画像編集モデルの重み | `train_safety_dpo.py --model-name` を実モデルで使う場合 | Hugging Face等(モデルごとのライセンス確認要) | `--mock` を使えば不要 |
+**このセッションから実際に取得を試みたが、いずれも組織のegressポリシーにより
+ブロックされており、本セッション内では準備できなかった**(`curl`で直接疎通確認、
+`403 Forbidden`/`CONNECT tunnel failed`を確認済み。プロキシの仕様上
+"Do not retry or route around it" と明記されているため、これ以上の回避は行っていない)。
+
+| ホスト | 用途 | 疎通確認結果 |
+|---|---|---|
+| `huggingface.co` | IESBench本体、Qwen-Image-Edit等の重み | ブロック(403) |
+| `modelscope.cn` | 代替ホスティングの可能性を確認 | ブロック(403) |
+| `zenodo.org` / `archive.org` | 学術データの代替ホスティング | ブロック(403) |
+| `cocodataset.org` / `paperswithcode.com` / `kaggle.com` | 実写背景画像の代替入手先 | ブロック(403) |
+
+一方、`github.com`(公式実装リポジトリ `CSU-JPG/VJA` のclone)は疎通可能だったため、
+**コード・README・ライセンス情報等は取得済み**(データセット本体は含まれていないことを確認)。
+以下は公式リポジトリから直接確認できた正確な情報。
+
+#### IESBench(データセット本体)
+
+- **入手先**: https://huggingface.co/datasets/CSU-JPG/IESBench (これのみが唯一の配布元。
+  GitHubリポジトリにはデータ本体は同梱されていない)
+- **スキーマ**(公式README記載、本リポジトリの`iesbench_schema.py`と完全一致するよう設計済み):
+  `question` / `image-path` / `attributes` / `action` / `category` / `rewrite` / `image_id`
+- **入手手順(ユーザー側の環境で実行)**:
+  ```bash
+  pip install huggingface_hub
+  huggingface-cli download CSU-JPG/IESBench --repo-type dataset --local-dir ./iesbench_official
+  # または
+  python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='CSU-JPG/IESBench', repo_type='dataset', local_dir='./iesbench_official')"
+  ```
+  取得後、`python -m src.dataset.iesbench_schema --load ./iesbench_official --validate` で
+  本リポジトリのローダーにそのまま読み込めることを確認できる。
+- **論文**: Hou, Jiacheng / Sun, Yining / Jin, Ruochong / Han, Haochen / Liu, Fangming /
+  Chan, Wai Kin Victor / Wang, Alex Jinpeng. "When the Prompt Becomes Visual: Vision-Centric
+  Jailbreak Attacks for Large Image Editing Models." ICML 2026 (Oral). arXiv:2602.10179.
+  ```bibtex
+  @misc{hou2026vja,
+        title={When the Prompt Becomes Visual: Vision-Centric Jailbreak Attacks for Large Image Editing Models},
+        author={Jiacheng Hou and Yining Sun and Ruochong Jin and Haochen Han and Fangming Liu and Wai Kin Victor Chan and Alex Jinpeng Wang},
+        year={2026}, eprint={2602.10179}, archivePrefix={arXiv}, primaryClass={cs.CV},
+        url={https://arxiv.org/pdf/2602.10179}}
+  ```
+
+#### 対象モデル(画像編集モデル本体)
+
+公式リポジトリの`src/requirements.txt`を確認したところ、防御実装は
+`torch==2.8.0` / `diffusers==0.36.0.dev0` / `transformers==4.57.1` に依存し、
+ベースモデルは既定で **`Qwen/Qwen-Image-Edit`**(Hugging Face, 拡散モデルベースの
+画像編集モデル)。これは本リポジトリの`train_safety_dpo.py`が前提とする
+`transformers.AutoModelForCausalLM`(テキスト生成インターフェース)とは
+**アーキテクチャが異なる**(`diffusers`のパイプラインクラスであり、pixel_values由来の
+画像条件付けを直接扱う)。`docs/06_novel_defense_proposals.md` 1.4節で述べた
+「現実装は拡散モデル型の画像編集モデル本体には未対応」という指摘は、この確認により
+裏付けられた。実際にQwen-Image-Edit自体をDPOで安全アライメントする場合は
+`diffusers`のLoRA/DreamBooth系ユーティリティに合わせた学習ループへの置き換えが必要。
+
+- 入手先: https://huggingface.co/Qwen/Qwen-Image-Edit(同じくブロック対象ホスト)
+- モデル規模: Qwen-Imageファミリーは約20Bパラメータ級の拡散トランスフォーマーであり、
+  推論だけでも一般的なコンシューマ向けGPU(VRAM 16GB以下)では収まらない可能性が高い
+  (公式`src/run.py`に`--cpu_offload`オプションが用意されているのはこのため)。
+  1節に記載したVRAM目安(1-13Bクラスの一般的なLLM/VLM微調整を想定した値)は
+  **この規模の拡散モデル本体には適用できない**点に注意。
+
+#### リーダーボード数値(公式README, 参考値として記録)
+
+公式リポジトリのREADMEに掲載されている全モデルの数値をそのまま転記する
+(`docs/00_overview.md`の要約値の裏付けとして、また追実験時の比較対象として)。
+
+| モデル | ASR (AVG) | HS (AVG) | EV (AVG) | HRR (AVG) |
+|---|---:|---:|---:|---:|
+| [O] Qwen-Image-Edit-Safe (公式提案手法) | 66.9 | 3.4 | 62.8 | 61.7 |
+| [C] GPT Image 1.5 | 70.3 | 3.2 | 63.0 | 52.0 |
+| [C] Nano Banana Pro | 80.9 | 3.8 | 79.1 | 70.6 |
+| [C] Seedream 4.5 | 94.1 | 4.4 | 86.3 | 83.8 |
+| [C] Qwen-Image-Edit (オンライン版, 無防御) | 97.5 | 4.1 | 87.7 | 73.8 |
+| [O] BAGEL | 100.0 | 4.1 | 82.0 | 70.6 |
+| [O] Flux2.0 [dev] | 100.0 | 4.6 | 87.1 | 84.6 |
+| [O] Qwen-Image-Edit* (ローカル版, 無防御) | 100.0 | 4.6 | 92.9 | 90.3 |
+
+([C]=商用モデル, [O]=オープンソースモデル。ASR/HS/EV/HRRの定義は`src/eval/metrics.py`と同一。
+per-category(I1〜I15)の内訳値は公式READMEに全て記載されているが、本表では紙面の都合上AVGのみ抜粋)
 
 ### 3.3 データセット容量の参考値
 
 - 生成済みサンプルデータセットは前掲2.3節の通り数MB〜十数MB程度。
-- 公式IESBench(1,054画像)は、画像編集ベンチマークとしては中規模であり、
-  一般的な画像解像度(数百KB/枚と仮定)から**数百MB〜1GB程度**と推定される
-  (未確認。公式配布ページで要確認)。
+- 公式IESBench(1,054画像)の正確なファイルサイズは、配布元(Hugging Face)への
+  アクセスがブロックされているため本セッションからは直接確認できなかった
+  (画像編集ベンチマークの一般的な傾向から数百MB〜1GB程度と推定されるが未確認)。
+- Qwen-Image-Editの重み一式は、20Bパラメータ級の拡散モデルとして
+  **数十GB規模**になる可能性が高い(fp16で約40GB程度が一般的な目安、要確認)。
 
 ## 4. 実行時間の目安(実測、4 vCPU環境)
 
@@ -155,3 +245,7 @@
 4. ディスク空き容量: 目安**2GB程度**(依存関係込み、CPU専用torch想定)
 5. 外部データセットのダウンロードは一切不要(全パイプラインが自己完結)
 6. GPU/VRAM: 不要(実VLMでのDPO学習を試す場合のみ、1節の目安を参照)
+7. 論文の数値を厳密に追実験する場合のみ、ユーザー自身の環境(このセッションの
+   egressポリシー外)で `pip install huggingface_hub` の上、3.2節の手順で
+   IESBenchと`Qwen/Qwen-Image-Edit`を取得してください(合計ディスク容量の
+   目安は2.5節、モデル規模はQwen-Imageファミリー約20Bパラメータ級)
