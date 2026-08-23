@@ -104,9 +104,10 @@ bash scripts/run_full_pipeline.sh
 個別に動かす場合:
 
 ```bash
-# 1. タイポグラフィ攻撃 + 図形化 + バリアント生成
-python -m src.attack.variant_generator --text "example harmful instruction placeholder" \
-    --out data/sample/variants --fonts sans,serif,mono --colors black,red,gradient \
+# 1. タイポグラフィ攻撃 + 図形化 + バリアント生成(テキストは内蔵のプレースホルダーを使用。
+#    カスタムテキストにする場合は generate_grid() の text_map 引数を使うこと。CLIに --text は無い)
+python -m src.attack.variant_generator \
+    --out data/sample/variants --fonts sans,serif,mono --colors black,red,gray_low_contrast \
     --languages en,ja --sizes 24,48,96 --shape-levels outline,filled,vector
 
 # 2. バリアント比較・最適化(OCR可読性 vs 検知回避のパレートフロント)
