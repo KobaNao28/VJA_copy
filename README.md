@@ -82,7 +82,9 @@ VJA_copy/
 │   │   └── unified_defense_pipeline.py # 上記を多層防御として統合するランタイム
 │   ├── eval/
 │   │   ├── metrics.py              # ASR/HS/EV/HRR
-│   │   ├── run_eval.py             # 攻撃×防御の一括評価CLI
+│   │   ├── model_adapter.py        # 評価対象モデルの抽象アダプタ(合成/実モデル差し替え口)
+│   │   ├── qwen_image_edit_adapter.py  # 実際のQwen-Image-Editをrun_eval.pyに接続するアダプタ(新規, GPU要)
+│   │   ├── run_eval.py             # 攻撃×防御の一括評価CLI(--qwen-image-editで実モデル評価可)
 │   │   └── vja_gap_eval.py         # テキスト攻撃 vs VJA型視覚指示攻撃での検知率比較
 │   └── utils/
 │       ├── io_utils.py

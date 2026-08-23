@@ -27,6 +27,8 @@
 | `immune_memory_defense.py` / `unified_defense_pipeline.py`(推論のみ) | 不要 | — |
 | `run_eval.py` / `vja_gap_eval.py`(評価ハーネス) | 不要 | — |
 | **`train_safety_dpo.py --model-name <実モデル>`**(実VLM/LLMをLoRAで安全アライメント学習する場合のみ) | **要(推奨)** | モデル規模に応じ下表参照 |
+| **`train_qwen_image_edit_dpo.py`**(実際のQwen-Image-Edit本体を4bit/8bit量子化+LoRAでDiffusion-DPO学習) | **要** | 32GB級を想定(1.1節参照) |
+| **`run_eval.py --qwen-image-edit`**(実際のQwen-Image-Editで画像編集を実行し評価、学習ではなく推論のみ) | **要** | 学習時より軽い(下記注記) |
 
 ### 1.1 `--model-name` 実行時のVRAM目安(LoRA + fp16、`peft`使用)
 
@@ -51,6 +53,25 @@
   画像入力(pixel_values)を条件付けに使うようforward呼び出しを拡張する必要がある。
 - GPU無し環境では `--mock` を使うことで配線検証は可能(本リポジトリの開発・検証も
   全て `--mock` で行った)。
+
+### 1.2 `run_eval.py --qwen-image-edit`(実モデルでの評価、推論のみ)
+
+`src/eval/qwen_image_edit_adapter.py` は `train_qwen_image_edit_dpo.py::load_real_pipeline()`
+で確認済みのAPIを使い、実際のQwen-Image-Editで画像編集を実行して`run_eval.py`の
+ASR/HS/EV/HRR評価に接続する(学習ではなく推論のみ)。
+
+- **学習(32GB級)より軽いはず**: 推論時は勾配・オプティマイザ状態が不要なため、
+  同じ4bit量子化+`enable_model_cpu_offload()`であれば学習より少ないVRAMで動く可能性が高い。
+  ただし本セッションでは実際の重みをダウンロードできないため、**具体的なGB数は未実測**。
+  まずは`--qwen-quantization 4bit`で試し、OOMになる場合は解像度を下げる/
+  `--qwen-steps`(推論ステップ数)を減らす等で調整すること。
+- **誠実な注記**: `pipe(image=..., prompt=..., num_inference_steps=..., true_cfg_scale=...)`
+  という呼び出しは diffusers の画像編集系パイプラインの一般的な慣例に基づく実装であり、
+  実際にQwen-Image-Editの重みに対して呼び出し確認はできていない。エラーが出た場合は
+  `qwen_image_edit_adapter.py::_call_pipe()` の引数名を実際のAPIに合わせて調整すること。
+- 「モデルが指示を拒否したか(`complied`)」の判定は本アダプタでは行わず、常に`True`を返す
+  (拡散モデル本体は明示的な拒否機構が無い限り何らかの画像を生成するため)。実際の安全性判定は
+  `judge.py::LLMJudge`(実LLMによる画像レビュー)で行うことを推奨する。
 
 ## 2. ディスク容量(実測値)
 

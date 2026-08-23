@@ -17,7 +17,7 @@ from src.defense.train_guard_classifier import GuardClassifier, load_image_tenso
 from src.defense.unified_defense_pipeline import UnifiedDefensePipeline
 from src.eval.judge import SyntheticJudge
 from src.eval.metrics import EvalRecord, aggregate_metrics, per_category_breakdown
-from src.eval.model_adapter import DummyWeaklyAlignedAdapter
+from src.eval.model_adapter import DummyWeaklyAlignedAdapter, ModelAdapter
 from src.utils.io_utils import write_json
 
 DEMO_IMAGE = "outputs/typography_demo.png"  # 画像未生成時のフォールバック(デモ用)
@@ -81,9 +81,10 @@ def _apply_defense(
 def run(
     dataset_path: str, defense: str, seed: int = 0,
     guard_ckpt: str = "outputs/guard_classifier.pt", guard_threshold: float = 0.5,
+    model: ModelAdapter | None = None,
 ) -> list[EvalRecord]:
     entries = load_entries(dataset_path)
-    model = DummyWeaklyAlignedAdapter(base_compliance=0.85, seed=seed)
+    model = model or DummyWeaklyAlignedAdapter(base_compliance=0.85, seed=seed)
     judge = SyntheticJudge(seed=seed)
 
     guard_model = load_guard_model(guard_ckpt) if defense in ("guard_classifier", "unified") else None
@@ -169,7 +170,28 @@ def main() -> None:
              "配線検証用の合成判定(乱数)にフォールバックする",
     )
     p.add_argument("--guard-threshold", type=float, default=0.5)
+    p.add_argument(
+        "--qwen-image-edit", action="store_true",
+        help="評価対象モデルとして DummyWeaklyAlignedAdapter(合成) の代わりに実際の "
+             "Qwen/Qwen-Image-Edit(diffusers)を使う。GPU + huggingfaceアクセス可能な環境が必要"
+             "(docs/10, src/eval/qwen_image_edit_adapter.py 参照)",
+    )
+    p.add_argument("--qwen-quantization", default="4bit", choices=["4bit", "8bit", "none"])
+    p.add_argument("--qwen-lora-dir", default=None, help="train_qwen_image_edit_dpo.py --save-dir で保存したDPO学習済みLoRAアダプタ(任意)")
+    p.add_argument("--qwen-steps", type=int, default=30)
+    p.add_argument("--qwen-cfg-scale", type=float, default=4.0)
     args = p.parse_args()
+
+    model = None
+    if args.qwen_image_edit:
+        from src.eval.qwen_image_edit_adapter import QwenImageEditAdapter
+
+        print(f"[情報] 実際のQwen-Image-Editをロード中(quantization={args.qwen_quantization})... 初回はモデルダウンロードで数分〜数十分かかる")
+        model = QwenImageEditAdapter(
+            quantization=args.qwen_quantization, lora_dir=args.qwen_lora_dir,
+            num_inference_steps=args.qwen_steps, true_cfg_scale=args.qwen_cfg_scale,
+        )
+        print("[情報] ロード完了")
 
     if args.defense in ("guard_classifier", "unified") or args.compare_all:
         if Path(args.guard_ckpt).exists():
@@ -184,7 +206,7 @@ def main() -> None:
     conditions = ["none", "introspective", "guard_classifier", "unified"] if args.compare_all else [args.defense]
     report = {}
     for cond in conditions:
-        records = run(args.dataset, cond, seed=args.seed, guard_ckpt=args.guard_ckpt, guard_threshold=args.guard_threshold)
+        records = run(args.dataset, cond, seed=args.seed, guard_ckpt=args.guard_ckpt, guard_threshold=args.guard_threshold, model=model)
         if not args.skip_benign:
             records = records + run_benign_control(cond, guard_ckpt=args.guard_ckpt, guard_threshold=args.guard_threshold)
         metrics = aggregate_metrics(records)
