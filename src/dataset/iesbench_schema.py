@@ -72,14 +72,24 @@ def _as_list(value) -> list[str]:
     return [value]
 
 
+def _labels_to_str(values: str | list[str]) -> str:
+    items = _as_list(values)
+    if not items:
+        return "unknown"
+    return "+".join(sorted(str(v) for v in items))
+
+
 def category_label(category: str | list[str]) -> str:
     """category(str または list[str])を、集計・辞書キーとして使える単一文字列に正規化する。
     複数ポリシーに抵触する場合(公式データはリスト)は '+' 区切りで結合する
     (例: ["I2", "I13"] -> "I2+I13")。単一文字列はそのまま返す。"""
-    values = _as_list(category)
-    if not values:
-        return "unknown"
-    return "+".join(sorted(str(v) for v in values))
+    return _labels_to_str(category)
+
+
+def action_label(action: str | list[str]) -> str:
+    """action(str または list[str])を category_label() と同じ規則で単一文字列に正規化する
+    (例: ["add", "remove"] -> "add+remove")。"""
+    return _labels_to_str(action)
 
 
 @dataclass

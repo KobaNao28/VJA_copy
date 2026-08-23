@@ -21,7 +21,7 @@
 
 | 区分 | 内容 |
 |---|---|
-| データセット | IESBench (1,054 画像 / 15 safety policy / 116 attributes / 9 actions)。公式配布は Hugging Face `CSU-JPG/IESBench`。本リポジトリでは **スキーマ互換のサンプル生成器** (`src/dataset/`) を同梱し、実データがなくてもパイプラインを検証可能(外部データセットのダウンロードは一切不要、詳細は`docs/09`) |
+| データセット | IESBench (1,054 画像 / 15 safety policy / 116 attributes / 9 actions)。公式配布は Hugging Face `CSU-JPG/IESBench`。本リポジトリでは **スキーマ互換のサンプル生成器** (`src/dataset/`) を同梱し、実データがなくてもパイプラインを検証可能(外部データセットのダウンロードは一切不要、詳細は`docs/09`)。実データを取得・加工して使う手順は`docs/10_official_dataset_workflow.md` |
 | 対象モデル | 画像編集VLM: Qwen-Image-Edit, Seedream, GPT-Image-1(.5), Nano Banana / Nano Banana Pro 等(API or 重みが必要) |
 | 計算資源(GPU/VRAM) | **既定の全パイプライン(攻撃生成・データセット構築・防御学習・評価)はGPU不要、CPUのみで動作**(本リポジトリの学習コードは全てCPUで動作確認済み)。`train_safety_dpo.py --model-name <実モデル>` で実VLMをLoRA微調整する場合のみGPU推奨(モデル規模により6〜32GB、詳細は`docs/09`) |
 | ディスク容量 | 依存関係込みで約1.5〜2GB(CPU専用torch)。生成データ・チェックポイントは数十MB程度(実測値は`docs/09`) |
@@ -48,6 +48,7 @@ VJA_copy/
 │   ├── 07_vja_faithful_defense_gap.md  # VJA本来の脅威モデル(非テキスト視覚指示)への適用性検証
 │   ├── 08_visual_to_visual_threat_expansion.md  # Visual-to-Visual攻撃の拡張: 時系列軌跡・GUI注入等
 │   ├── 09_resource_requirements.md  # 実行環境要件: VRAM・ディスク容量・データセット(実測値)
+│   ├── 10_official_dataset_workflow.md  # 公式IESBench等の取得・検証・加工・実験手順
 │   └── templates/guideline_template.md  # 統一学習ガイドラインのコピー用テンプレート
 ├── src/
 │   ├── attack/
@@ -63,9 +64,11 @@ VJA_copy/
 │   │   ├── temporal_trajectory_attack.py # 時系列軌跡エンコーディング攻撃(動画フレーム列)
 │   │   └── trajectory_variant_generator.py
 │   ├── dataset/
-│   │   ├── iesbench_schema.py      # IESBench互換スキーマ(dataclass/JSON Schema)
-│   │   ├── dataset_optimizer.py    # データセット構築の最適化アルゴリズム(被覆率×多様性×難易度)
-│   │   ├── build_dataset.py        # 上記を用いたサンプルデータセット構築CLI
+│   │   ├── iesbench_schema.py      # IESBench互換スキーマ(dataclass/JSON Schema、公式データのlist型action/categoryに対応)
+│   │   ├── coverage_optimizer.py   # 被覆×多様性×難易度バランスの貪欲選択エンジン(dataset_optimizer/dataset_adapterが共有)
+│   │   ├── dataset_optimizer.py    # データセット「1から作成」(合成候補プールから最適化選抜)
+│   │   ├── dataset_adapter.py      # 既存データセット(公式IESBench等)を「加工」して最適化サブセットを選抜(新規)
+│   │   ├── build_dataset.py        # dataset_optimizer.pyを用いたサンプルデータセット構築CLI
 │   │   └── lexicon_optimizer.py    # 3段階脅威度の単語レベル語彙データセット+最適化(新規提案)
 │   ├── defense/
 │   │   ├── train_safety_dpo.py     # マルチモーダルDPOによる安全アライメント学習
@@ -131,6 +134,12 @@ python -m src.defense.curriculum_dpo --data data/sample/dpo_preferences.jsonl --
 
 # 9. [新規提案] Attack Immune Memory: 検知回避パターンを記憶し高速照合
 python -m src.defense.immune_memory_defense --guard-ckpt outputs/guard_classifier.pt --n-steps 30
+
+# 10. 公式IESBench等の実データを使う場合(取得手順は docs/10_official_dataset_workflow.md)
+python -m src.dataset.iesbench_schema --load ./iesbench_official --validate
+python -m src.dataset.dataset_adapter --source ./iesbench_official --n-target 200 \
+    --out outputs/iesbench_subset_200.jsonl   # 被覆バランスを保ったまま間引く(加工)
+python -m src.eval.run_eval --dataset ./iesbench_official --compare-all --out outputs/eval_report.json
 ```
 
 ## 4. ドキュメント一覧
@@ -145,6 +154,7 @@ python -m src.defense.immune_memory_defense --guard-ckpt outputs/guard_classifie
 - [`docs/07_vja_faithful_defense_gap.md`](docs/07_vja_faithful_defense_gap.md) — VJA本来の脅威モデル(非テキスト視覚指示)への防御適用性の検証(検知率0%→92.3%の実証)
 - [`docs/08_visual_to_visual_threat_expansion.md`](docs/08_visual_to_visual_threat_expansion.md) — Visual-to-Visual攻撃の拡張(時系列軌跡エンコーディング・GUI/エージェント・ハイジャック)の実装と実証
 - [`docs/09_resource_requirements.md`](docs/09_resource_requirements.md) — 実行環境要件(VRAM・ディスク容量・データセット・実行時間の実測値)
+- [`docs/10_official_dataset_workflow.md`](docs/10_official_dataset_workflow.md) — 公式IESBench等の取得・検証・加工・実験手順(「1から作成」と「既存データセットから加工」の使い分け)
 
 ## 5. ライセンス・出典
 

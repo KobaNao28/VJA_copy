@@ -1,5 +1,14 @@
 """
-VJA/IESBench風データセットの「作成最適化アルゴリズム」。
+VJA/IESBench風データセットの「1から作成する」最適化アルゴリズム(合成生成)。
+
+このモジュールは SAFETY_POLICIES × ATTRIBUTES × EDIT_ACTIONS の直積からプレースホルダー
+候補プールを合成生成し、被覆×多様性×難易度バランスを最大化するN件を貪欲選択することで
+「架空だが体系的に偏りのない」データセットを1から組み立てる(実在の外部データセットには
+一切依存しない)。
+
+公式IESBench等、既に存在するデータセットを"加工"して同様の最適化選抜を行いたい場合は、
+本モジュールではなく src/dataset/dataset_adapter.py を使う(実データのentryを候補として
+扱う点のみが異なり、選抜アルゴリズム自体は src/dataset/coverage_optimizer.py を共有する)。
 
 目的: 限られたアノテーション予算 N の中で、
   (1) 安全ポリシー×属性×編集アクションの組み合わせ被覆を最大化し
@@ -14,32 +23,21 @@ VJA/IESBench風データセットの「作成最適化アルゴリズム」。
   貪欲法は (1 - 1/e) ≈ 63% の近似保証を持つ (Nemhauser, Wolsey and Fisher, 1978)。
   DifficultyBalance項は貪欲法の各ステップでヒストグラムギャップを埋める形の
   ボーナスとして加える(理論的な劣モジュラ保証はないが実用上有効)。
+  貪欲選択の本体(ベクトル化実装)は src/dataset/coverage_optimizer.py::greedy_select() を使う。
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 from dataclasses import dataclass, field
 from itertools import product
 
 import numpy as np
 
+from src.dataset.coverage_optimizer import greedy_select, hash_embedding
 from src.dataset.iesbench_schema import ATTRIBUTES, EDIT_ACTIONS, SAFETY_POLICIES, IESBenchEntry
 from src.utils.seed import set_seed
 
-
-def _hash_embedding(text: str, dim: int = 64) -> np.ndarray:
-    """
-    軽量な特徴ベクトル化(hashing trick によるBoW的埋め込み)。
-    本番運用では CLIP/text-encoder による意味埋め込みに差し替えることを想定した
-    プレースホルダー実装(依存を増やさずアルゴリズムのロジックを検証するため)。
-    """
-    vec = np.zeros(dim, dtype=np.float64)
-    for token in text.lower().replace("_", " ").split():
-        h = int(hashlib.md5(token.encode()).hexdigest(), 16)
-        vec[h % dim] += 1.0
-    norm = np.linalg.norm(vec)
-    return vec / norm if norm > 0 else vec
+_hash_embedding = hash_embedding  # 後方互換のためのエイリアス(このモジュール内で従来使用)
 
 
 @dataclass
@@ -98,63 +96,22 @@ def greedy_optimize(
     seed: int = 42,
 ) -> list[Candidate]:
     """
-    貪欲法による被覆×多様性×難易度バランスの最適化(numpyベクトル化実装)。
-
-    素朴な実装(各ステップで残り候補それぞれについて既選択集合全件との類似度を
-    Pythonループで計算する)は O(n_target^2 * pool_size) となり、
-    候補プールが大きい(例: 15カテゴリ×116属性×9アクション ≈ 15,660件)場合に
-    数分〜数十分かかってしまう。ここでは facility location の標準的な高速化トリックである
-    「各候補が保持する『既選択集合との最大類似度』を、新規選択1件との類似度だけで
-    差分更新する」方式を用い、計算量を O(n_target * pool_size) に落とす。
+    貪欲法による被覆×多様性×難易度バランスの最適化。
+    本体は src/dataset/coverage_optimizer.py::greedy_select() (numpyベクトル化実装、
+    src/dataset/dataset_adapter.py と共有)に委譲し、ここでは Candidate ->
+    (embedding, difficulty, coverage_key, diversity_key) への変換のみを行う。
     """
-    rng = np.random.default_rng(seed)
-    order = rng.permutation(len(pool))  # 同点時のタイブレークをランダム化
-    pool_ordered = [pool[i] for i in order]
+    embeddings = np.stack([c.embedding for c in pool])  # (P, D)
+    difficulties = np.array([c.difficulty for c in pool])
+    coverage_keys = [f"{c.category}|{c.action}" for c in pool]
+    diversity_keys = [c.attribute for c in pool]
 
-    embeddings = np.stack([c.embedding for c in pool_ordered])  # (P, D)
-    difficulties = np.array([c.difficulty for c in pool_ordered])
-    diff_bins = np.minimum(n_difficulty_bins - 1, (difficulties * n_difficulty_bins).astype(int))
-
-    # 被覆判定を整数コードに変換し、以降は完全に配列演算だけで判定する(Pythonループ回避)。
-    pair_keys = [f"{c.category}|{c.action}" for c in pool_ordered]
-    attr_keys = [c.attribute for c in pool_ordered]
-    _, pair_codes = np.unique(pair_keys, return_inverse=True)
-    _, attr_codes = np.unique(attr_keys, return_inverse=True)
-    pair_covered = np.zeros(pair_codes.max() + 1, dtype=bool)
-    attr_covered = np.zeros(attr_codes.max() + 1, dtype=bool)
-
-    n = len(pool_ordered)
-    available = np.ones(n, dtype=bool)
-    max_sim_to_selected = np.zeros(n)          # facility location: 既選択集合との最大類似度
-    difficulty_hist = np.zeros(n_difficulty_bins)
-
-    selected_idx: list[int] = []
-    n_target = min(n_target, n)
-
-    for _ in range(n_target):
-        cov_gain = (~pair_covered[pair_codes]).astype(float) + (~attr_covered[attr_codes]).astype(float)
-        div_gain = 1.0 - max_sim_to_selected
-
-        total_selected = difficulty_hist.sum()
-        fill_ratio = difficulty_hist[diff_bins] / total_selected if total_selected > 0 else np.zeros(n)
-        diff_gain = 1.0 - fill_ratio
-
-        score = w_coverage * cov_gain + w_diversity * div_gain + w_difficulty_balance * diff_gain
-        score = np.where(available, score, -np.inf)
-
-        best_idx = int(np.argmax(score))
-        selected_idx.append(best_idx)
-        available[best_idx] = False
-
-        pair_covered[pair_codes[best_idx]] = True
-        attr_covered[attr_codes[best_idx]] = True
-        difficulty_hist[diff_bins[best_idx]] += 1
-
-        # facility location の差分更新: 新規選択との類似度で max_sim を更新(ベクトル化)
-        sims_to_new = embeddings @ embeddings[best_idx]
-        np.maximum(max_sim_to_selected, sims_to_new, out=max_sim_to_selected)
-
-    return [pool_ordered[i] for i in selected_idx]
+    idx = greedy_select(
+        embeddings, difficulties, coverage_keys, diversity_keys, n_target,
+        w_coverage=w_coverage, w_diversity=w_diversity, w_difficulty_balance=w_difficulty_balance,
+        n_difficulty_bins=n_difficulty_bins, seed=seed,
+    )
+    return [pool[i] for i in idx]
 
 
 def coverage_report(selected: list[Candidate]) -> dict:

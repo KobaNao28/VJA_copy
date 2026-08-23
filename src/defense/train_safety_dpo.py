@@ -31,6 +31,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.dataset.iesbench_schema import action_label, category_label, load_entries
 from src.utils.seed import set_seed
 
 
@@ -206,21 +207,29 @@ class SafetyPreferenceExample:
     image_path: str | None = None
 
 
-def build_synthetic_preference_data(iesbench_jsonl: str, out_path: str, n: int = 60) -> None:
+def build_synthetic_preference_data(source: str, out_path: str, n: int = 60) -> None:
     """
-    src/dataset/build_dataset.py が生成したIESBench互換データから、
+    IESBench互換データ(src/dataset/build_dataset.py が生成した合成データ、または
+    公式IESBench配布物のディレクトリ/JSON/JSONLをそのまま指定)から、
     「危険な編集をそのまま実行する応答(rejected)」対「安全ポリシーに触れて拒否/代替案を
     提示する応答(chosen)」の選好ペアを合成する(プレースホルダー文言)。
+
+    公式データはcategory/actionがリスト型(複数ポリシー/複数アクションに抵触しうる)のため、
+    iesbench_schema.load_entries() + category_label()/action_label() で読み込み・正規化する
+    (docs/10_official_dataset_workflow.md 参照)。
     """
-    rows = [json.loads(l) for l in Path(iesbench_jsonl).read_text(encoding="utf-8").splitlines() if l.strip()][:n]
+    entries = load_entries(source)[:n]
     out_rows = []
-    for row in rows:
-        prompt = f"[image with embedded visual instruction] {row['question']}"
+    for e in entries:
+        category = category_label(e.category)
+        action = action_label(e.action)
+        attribute = e.attributes[0] if e.attributes else "対象領域"
+        prompt = f"[image with embedded visual instruction] {e.question}"
         chosen = (
-            f"このリクエストは安全ポリシー『{row['category']}』に抵触する可能性があるため、"
+            f"このリクエストは安全ポリシー『{category}』に抵触する可能性があるため、"
             f"編集を実行せず、理由を説明した上で安全な代替案を提示します。"
         )
-        rejected = f"了解しました。{row['action']} を {row['attributes'][0]} に対して直ちに実行します。"
+        rejected = f"了解しました。{action} を {attribute} に対して直ちに実行します。"
         out_rows.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +242,12 @@ def build_synthetic_preference_data(iesbench_jsonl: str, out_path: str, n: int =
 def main() -> None:
     p = argparse.ArgumentParser(description="マルチモーダルDPOによる安全アライメント学習")
     p.add_argument("--data", default="data/sample/dpo_preferences.jsonl")
-    p.add_argument("--build-from-iesbench", default=None, help="IESBench互換jsonlから選好データを自動合成")
+    p.add_argument(
+        "--build-from-iesbench", default=None,
+        help="IESBench互換データから選好データを自動合成する。本リポジトリの合成jsonlに加え、"
+             "公式IESBench展開先ディレクトリや他データセットのjson/jsonlも直接指定可能"
+             "(load_entries()が読める形式ならよい。docs/10_official_dataset_workflow.md 参照)",
+    )
     p.add_argument("--mock", action="store_true", help="外部モデル不要のミニTransformerで配線検証")
     p.add_argument("--model-name", default=None, help="HF上の実VLM/LLMモデルID(--mock未指定時に使用)")
     p.add_argument("--no-lora", action="store_true")
