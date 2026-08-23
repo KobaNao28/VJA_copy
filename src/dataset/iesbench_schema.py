@@ -86,24 +86,77 @@ class IESBenchEntry:
         return errors
 
 
+# annotationファイルの名前候補(公式配布での正確なファイル名が確認できていないため、
+# 複数の一般的な名前を優先順位付きで試す。存在しないファイル名を決め打ちして
+# 黙って0件を返す事故を防ぐため、最終的に見つからなければ明示的にエラーにする)
+_ANNOTATION_FILENAME_CANDIDATES = [
+    "annotations.json", "annotation.json", "data.json", "metadata.json",
+    "iesbench.json", "IESBench.json", "test.json", "eval.json",
+    "annotations.jsonl", "data.jsonl", "iesbench.jsonl",
+]
+
+
+def _find_annotation_file(dir_path: Path) -> Path:
+    for name in _ANNOTATION_FILENAME_CANDIDATES:
+        candidate = dir_path / name
+        if candidate.exists():
+            return candidate
+
+    # 既知の名前で見つからない場合、直下 → 1階層下の順に *.json/*.jsonl を総当たりで探す。
+    # img/assets等の画像フォルダを除外し、候補が1件に絞れれば自動採用する。
+    exclude_dirs = {"img", "images", "assets", "image"}
+    for depth_glob in ("*.json", "*.jsonl", "*/*.json", "*/*.jsonl"):
+        candidates = [
+            p for p in dir_path.glob(depth_glob)
+            if p.is_file() and not (len(p.relative_to(dir_path).parts) > 1 and p.relative_to(dir_path).parts[0] in exclude_dirs)
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise FileNotFoundError(
+                f"{dir_path} 内でannotationファイルの候補が複数見つかり自動判定できません: "
+                f"{[str(p.relative_to(dir_path)) for p in candidates]}\n"
+                f"--load に直接ファイルパスを指定してください(例: --load {candidates[0]})"
+            )
+
+    all_files = sorted(p.name for p in dir_path.iterdir())[:30] if dir_path.exists() else []
+    raise FileNotFoundError(
+        f"{dir_path} 内にannotationファイル(json/jsonl)が見つかりませんでした。\n"
+        f"既知の候補名: {_ANNOTATION_FILENAME_CANDIDATES}\n"
+        f"ディレクトリ直下の内容(先頭30件): {all_files}\n"
+        f"実際のファイル名が分かる場合は --load {dir_path}/<実際のファイル名> のように直接指定してください。"
+    )
+
+
 def load_entries(path: str | Path) -> list[IESBenchEntry]:
     path = Path(path)
     if path.is_dir():
-        json_path = path / "annotations.json"
-        raw = read_json(json_path) if json_path.exists() else []
+        json_path = _find_annotation_file(path)
+        base_dir = path
+        raw = list(read_jsonl(json_path)) if json_path.suffix == ".jsonl" else read_json(json_path)
+        if isinstance(raw, dict) and "data" in raw:
+            raw = raw["data"]
     elif path.suffix == ".jsonl":
         raw = list(read_jsonl(path))
+        base_dir = path.parent
     else:
         raw = read_json(path)
         if isinstance(raw, dict) and "data" in raw:
             raw = raw["data"]
+        base_dir = path.parent
 
     entries = []
     for row in raw:
+        raw_image_path = row.get("image_path", row.get("image-path", ""))
+        resolved_image_path = raw_image_path
+        if raw_image_path and not Path(raw_image_path).is_absolute():
+            candidate = base_dir / raw_image_path
+            if candidate.exists():
+                resolved_image_path = str(candidate)
         entries.append(
             IESBenchEntry(
                 image_id=row.get("image_id", ""),
-                image_path=row.get("image_path", row.get("image-path", "")),
+                image_path=resolved_image_path,
                 question=row.get("question", ""),
                 attributes=row.get("attributes", []),
                 action=row.get("action", ""),
