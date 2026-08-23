@@ -62,28 +62,64 @@ ATTRIBUTES: list[str] = sorted(
 )[:116]
 
 
+def _as_list(value) -> list[str]:
+    """公式データはaction/categoryが複数値を許容するリストの場合がある(1件が複数ポリシーに
+    抵触しうるため)。本リポジトリの合成データ生成器は単一文字列で渡すため、両対応する。"""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
 @dataclass
 class IESBenchEntry:
     image_id: str
     image_path: str
     question: str
     attributes: list[str]
-    action: str
-    category: str
+    action: str | list[str]
+    category: str | list[str]
     rewrite: str = ""
     extra: dict = field(default_factory=dict)
 
-    def validate(self) -> list[str]:
+    def validate(self, check_taxonomy: bool = True) -> list[str]:
+        """
+        check_taxonomy=True: action/categoryが本リポジトリの合成ラベル体系
+          (EDIT_ACTIONS/SAFETY_POLICIES)に含まれるかを厳密に検証する
+          (本リポジトリの合成データ向け)。
+        check_taxonomy=False: 値が空でないかのみを構造的に検証する
+          (公式IESBenchはaction=自由記述動詞、category='I1'〜'I15'のコード名を
+          使っており、本リポジトリの推測ラベルとは一致しないため)。
+        """
         errors = []
-        if self.action not in EDIT_ACTIONS:
-            errors.append(f"未知のaction: {self.action}")
-        if self.category not in SAFETY_POLICIES:
-            errors.append(f"未知のcategory: {self.category}")
+        actions = _as_list(self.action)
+        categories = _as_list(self.category)
+
+        if check_taxonomy:
+            unknown_actions = [a for a in actions if a not in EDIT_ACTIONS]
+            if unknown_actions:
+                errors.append(f"未知のaction: {unknown_actions}")
+            unknown_categories = [c for c in categories if c not in SAFETY_POLICIES]
+            if unknown_categories:
+                errors.append(f"未知のcategory: {unknown_categories}")
+        else:
+            if not actions or not any(actions):
+                errors.append("actionが空です")
+            if not categories or not any(categories):
+                errors.append("categoryが空です")
+
         if not self.attributes:
             errors.append("attributesが空です")
         if not self.image_id:
             errors.append("image_idが空です")
         return errors
+
+    def looks_like_official_labels(self) -> bool:
+        """categoryが 'I1'〜'I15' のような公式コード名パターンに一致するかを判定する。"""
+        import re
+
+        return any(re.fullmatch(r"I\d{1,2}", c) for c in _as_list(self.category))
 
 
 # annotationファイルの名前候補(公式配布での正確なファイル名が確認できていないため、
@@ -183,14 +219,33 @@ def main() -> None:
     p = argparse.ArgumentParser(description="IESBench互換データのロード・検証")
     p.add_argument("--load", required=True)
     p.add_argument("--validate", action="store_true")
+    p.add_argument(
+        "--check-taxonomy", choices=["auto", "on", "off"], default="auto",
+        help="action/categoryを本リポジトリの合成ラベル体系(EDIT_ACTIONS/SAFETY_POLICIES)と"
+             "照合するか。autoなら公式IESBenchの'I1'〜'I15'形式のcategoryを検出した場合に自動でoffにする",
+    )
     args = p.parse_args()
 
     entries = load_entries(args.load)
     print(f"読み込みエントリ数: {len(entries)}")
+    if not entries:
+        return
+
+    if args.check_taxonomy == "auto":
+        check_taxonomy = not entries[0].looks_like_official_labels()
+        if not check_taxonomy:
+            print(
+                "[情報] category が 'I1'〜'I15' 形式(公式IESBenchのラベル)と判定したため、"
+                "本リポジトリの合成ラベル体系(SAFETY_POLICIES/EDIT_ACTIONS)との照合はスキップし、"
+                "構造的な検証(空チェック)のみ行います。"
+            )
+    else:
+        check_taxonomy = args.check_taxonomy == "on"
+
     if args.validate:
         n_bad = 0
         for e in entries:
-            errs = e.validate()
+            errs = e.validate(check_taxonomy=check_taxonomy)
             if errs:
                 n_bad += 1
                 print(f"  [NG] {e.image_id}: {errs}")
