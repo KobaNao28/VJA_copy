@@ -161,7 +161,22 @@ def load_real_pipeline(config: QwenImageEditDPOConfig):
     lora_config = LoraConfig(r=config.lora_rank, lora_alpha=config.lora_alpha, target_modules="all-linear")
     transformer = get_peft_model(transformer, lora_config)
     if config.gradient_checkpointing:
-        transformer.gradient_checkpointing_enable()
+        # diffusersのModelMixin系は transformers.PreTrainedModel と異なり
+        # enable_gradient_checkpointing() という名前を使う(gradient_checkpointing_enable()ではない)。
+        # peft.PeftModelの属性委譲チェーン経由で内側のdiffusersモデルへ届く。
+        # 将来のdiffusers/peftバージョン差異に備え、どちらの名前も存在しなければ
+        # 警告のみで学習自体は続行する(gradient checkpointingはVRAM節約のための最適化であり、
+        # 無効でも正しさには影響しないため)。
+        if hasattr(transformer, "enable_gradient_checkpointing"):
+            transformer.enable_gradient_checkpointing()
+        elif hasattr(transformer, "gradient_checkpointing_enable"):
+            transformer.gradient_checkpointing_enable()
+        else:
+            print(
+                "[警告] transformerにgradient checkpointingを有効化するメソッドが見つかりません"
+                "(enable_gradient_checkpointing/gradient_checkpointing_enableのいずれも無し)。"
+                "VRAM使用量は増えますが、無効のまま学習/推論を継続します。"
+            )
 
     pipe = QwenImageEditPipeline.from_pretrained(
         config.model_name, transformer=transformer, torch_dtype=torch.bfloat16,

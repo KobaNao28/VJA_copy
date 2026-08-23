@@ -48,7 +48,11 @@ class QwenImageEditAdapter(ModelAdapter):
         out_dir: str = "outputs/qwen_image_edit_eval",
         refusal_detector: Optional[RefusalDetector] = None,
     ):
-        config = QwenImageEditDPOConfig(quantization=quantization)
+        # gradient checkpointingは逆伝播(学習)時のVRAM節約用の最適化であり、
+        # run_eval.py経由の推論のみの用途では不要(かつ無効にしておけば
+        # diffusers/peftバージョン差異によるgradient_checkpointing_enable系の
+        # 非互換を推論経路では踏まずに済む)。
+        config = QwenImageEditDPOConfig(quantization=quantization, gradient_checkpointing=False)
         self.pipe = load_real_pipeline(config)
         if lora_dir:
             # train_qwen_image_edit_dpo.py --save-dir で保存したLoRAアダプタ(安全アライメント後の重み)を適用する。
