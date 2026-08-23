@@ -72,6 +72,16 @@ def _as_list(value) -> list[str]:
     return [value]
 
 
+def category_label(category: str | list[str]) -> str:
+    """category(str または list[str])を、集計・辞書キーとして使える単一文字列に正規化する。
+    複数ポリシーに抵触する場合(公式データはリスト)は '+' 区切りで結合する
+    (例: ["I2", "I13"] -> "I2+I13")。単一文字列はそのまま返す。"""
+    values = _as_list(category)
+    if not values:
+        return "unknown"
+    return "+".join(sorted(str(v) for v in values))
+
+
 @dataclass
 class IESBenchEntry:
     image_id: str

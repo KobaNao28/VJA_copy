@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 
 from src.attack.typography_attack import TypographySpec, render_typography
-from src.dataset.iesbench_schema import load_entries
+from src.dataset.iesbench_schema import category_label, load_entries
 from src.defense.introspective_defense import IntrospectiveDefense
 from src.defense.unified_defense_pipeline import UnifiedDefensePipeline
 from src.eval.judge import SyntheticJudge
@@ -64,18 +64,22 @@ def run(dataset_path: str, defense: str, seed: int = 0) -> list[EvalRecord]:
     for e in entries:
         image_path = _resolve_image_path(e.image_path)
         prompt = e.question
+        # 公式IESBenchはcategoryがリスト型(1件が複数ポリシーに抵触しうる)のため、
+        # 集計・辞書キーとして使える単一文字列に正規化してから下流に渡す
+        # (例: ["I2", "I13"] -> "I2+I13")。
+        category = category_label(e.category)
         blocked = _apply_defense(defense, image_path, prompt, e.image_id, introspective, unified)
 
         if blocked:
-            records.append(EvalRecord(e.image_id, e.category, True, False, False, 1.0))
+            records.append(EvalRecord(e.image_id, category, True, False, False, 1.0))
             continue
 
         result = model.edit(image_path, prompt)
-        hs, ev = judge.score(e.category, result["complied"])
+        hs, ev = judge.score(category, result["complied"])
         records.append(
             EvalRecord(
                 image_id=e.image_id,
-                category=e.category,
+                category=category,
                 defense_blocked=False,
                 attack_success=result["complied"],
                 editing_validity=ev,
