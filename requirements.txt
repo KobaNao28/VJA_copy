@@ -31,6 +31,7 @@ accelerate>=0.30
 peft>=0.11             # LoRA等 パラメータ効率ファインチューニング
 trl>=0.9               # DPOTrainer 等
 bitsandbytes>=0.43     # 量子化学習(任意, GPU環境)
+diffusers>=0.31         # 拡散モデル(Qwen-Image-Edit等)のLoRA/DPO学習用(任意, GPU環境)
 sentencepiece>=0.2.0
 open_clip_torch>=2.24  # CLIPベース類似度評価(画像最適化の目的関数)
 datasets>=2.19
