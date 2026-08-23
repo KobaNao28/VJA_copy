@@ -7,33 +7,53 @@
 LoRAアダプタ(`train_qwen_image_edit_dpo.py --save-dir`の出力)を適用した状態("安全アライメント後")
 でも、ベースモデルのまま("無防御"設定、論文でいう[O] Qwen-Image-Edit*相当)でも評価できる。
 
-## 誠実な注記(重要)
+## 公式実装(CSU-JPG/VJA)で確認した内容(2026年時点でclone・確認済み)
 
-- `load_real_pipeline()`が確認しているのは「モデル/コンフィグのロードAPI」までであり、
-  実際の生成呼び出し `pipe(image=..., prompt=..., ...)` の正確なkwargs名は、
-  本セッションが重みをダウンロードできない制約上、diffusersの画像編集系パイプライン
-  (Qwen-Image-Edit公式のREADME/使用例)の一般的な慣例に基づいて実装している。
-  実際に動かす環境でエラーが出た場合は `help(pipe.__call__)` や公式の使用例で
-  正確な引数名を確認し、`_call_pipe()` を調整すること。
-- `complied`(モデルが指示に従ったか)の判定は本アダプタでは常に `True` とする。
-  拡散モデル本体は(安全アライメント済みの特別な拒否機構が無い限り)基本的に
-  何らかの画像を生成してしまうため、「拒否したかどうか」を画像そのものから判定するのは
-  本質的にjudge(LLM-as-judge等)の仕事である(`src/eval/judge.py::LLMJudge`)。
-  もし使用するチェックポイントに既知の拒否シグナル(特定のウォーターマーク画像、
-  変化のない出力等)があるなら、`refusal_detector` にコールバックとして渡すことで
-  上書きできる。
+公式リポジトリには単一画像デモ `src/run.py` があり、実際の生成呼び出しは以下の形:
+
+```python
+inputs = {
+    "image": input_image, "prompt": input_prompt,
+    "generator": torch.manual_seed(0), "true_cfg_scale": 4.0,
+    "negative_prompt": " ", "num_inference_steps": 40,
+}
+try:
+    output = pipeline(**inputs)
+    output_image = output.images[0]
+except Exception as e:
+    print("拒否: ", e.reason)  # QwenImageEditSafePipeline は SafetyError(message, code) を送出する
+```
+
+本アダプタはこの呼び出し形式に合わせている(kwargs名・既定値とも公式コードに準拠)。
+ただし公式READMEは「complete evaluation code」(バッチ評価ハーネス)は本稿執筆時点で
+未公開("in the coming weeks")と明記しており、上記は単一画像用のデモに過ぎない。
+本アダプタ・`qwen_manual_inspection.py`(バッチ実行+目視確認レポート)は公式コードの
+コピーではなく、上記で確認したAPIに基づくオリジナル実装である。
+
+## 誠実な注記
+
+- **`complied`(モデルが拒否したか)の判定は「生成呼び出しが例外を送出したか」で行う**
+  (公式の`QwenImageEditSafePipeline`が`SafetyError(message, code)`を送出する設計を
+  確認したため。`.reason`/`.judgment`属性があれば`refusal_reason`として記録する)。
+  ただしベースの`QwenImageEditPipeline`/`QwenImageEditPlusPipeline`自体は明示的な
+  拒否機構を持たないため、公式の安全パイプラインを使わない限り例外は発生せず
+  `complied=True`に倒れる(=無防御ベースラインは基本的に指示に従う、という論文の
+  前提と整合する)。
+- `pipe=`引数で任意の事前構築済みパイプラインを直接渡せる。公式の
+  `QwenImageEditSafePipeline`(`docs/11_qwen_real_model_verification.md`の手順で
+  ユーザー自身が公式リポジトリから読み込む)を渡せば、本リポジトリの評価ハーネス
+  (`run_eval.py`/`qwen_manual_inspection.py`)からそのまま比較評価できる。
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
+import torch
 from PIL import Image
 
 from src.defense.train_qwen_image_edit_dpo import QwenImageEditDPOConfig, load_real_pipeline
 from src.eval.model_adapter import ModelAdapter
-
-RefusalDetector = Callable[[Image.Image, Image.Image, str], bool]  # (source, output, prompt) -> 拒否したか
 
 
 class QwenImageEditAdapter(ModelAdapter):
@@ -43,48 +63,56 @@ class QwenImageEditAdapter(ModelAdapter):
         self,
         quantization: str = "4bit",
         lora_dir: Optional[str] = None,
-        num_inference_steps: int = 30,
+        num_inference_steps: int = 40,
         true_cfg_scale: float = 4.0,
+        negative_prompt: str = " ",
+        seed: int = 0,
         out_dir: str = "outputs/qwen_image_edit_eval",
-        refusal_detector: Optional[RefusalDetector] = None,
+        pipe=None,
     ):
-        # gradient checkpointingは逆伝播(学習)時のVRAM節約用の最適化であり、
-        # run_eval.py経由の推論のみの用途では不要(かつ無効にしておけば
-        # diffusers/peftバージョン差異によるgradient_checkpointing_enable系の
-        # 非互換を推論経路では踏まずに済む)。
-        config = QwenImageEditDPOConfig(quantization=quantization, gradient_checkpointing=False)
-        self.pipe = load_real_pipeline(config)
-        if lora_dir:
-            # train_qwen_image_edit_dpo.py --save-dir で保存したLoRAアダプタ(安全アライメント後の重み)を適用する。
-            self.pipe.transformer.load_adapter(lora_dir, adapter_name="dpo_safety")
-            self.pipe.transformer.set_adapter("dpo_safety")
+        if pipe is not None:
+            # 事前構築済みパイプライン(例: ユーザーが公式リポジトリから読み込んだ
+            # QwenImageEditSafePipeline)をそのまま使う。quantization/lora_dirは無視される。
+            self.pipe = pipe
+        else:
+            # gradient checkpointingは逆伝播(学習)時のVRAM節約用の最適化であり、
+            # 推論のみのこの用途では不要(diffusers/peftバージョン差異による
+            # gradient_checkpointing_enable系の非互換も推論経路では踏まずに済む)。
+            config = QwenImageEditDPOConfig(quantization=quantization, gradient_checkpointing=False)
+            self.pipe = load_real_pipeline(config)
+            if lora_dir:
+                # train_qwen_image_edit_dpo.py --save-dir で保存したLoRAアダプタ(安全アライメント後の重み)を適用する。
+                self.pipe.transformer.load_adapter(lora_dir, adapter_name="dpo_safety")
+                self.pipe.transformer.set_adapter("dpo_safety")
+
         self.num_inference_steps = num_inference_steps
         self.true_cfg_scale = true_cfg_scale
+        self.negative_prompt = negative_prompt
+        self.seed = seed
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        self.refusal_detector = refusal_detector
         self._counter = 0
-
-    def _call_pipe(self, image: Image.Image, prompt: str) -> Image.Image:
-        """実際の生成呼び出し。kwargs名は要検証(このファイル冒頭の注記参照)。"""
-        result = self.pipe(
-            image=image,
-            prompt=prompt,
-            num_inference_steps=self.num_inference_steps,
-            true_cfg_scale=self.true_cfg_scale,
-        )
-        return result.images[0]
 
     def edit(self, image_path: str, prompt: str) -> dict:
         source = Image.open(image_path).convert("RGB")
-        output = self._call_pipe(source, prompt)
-
         self._counter += 1
+
+        # 公式run.pyと同じ呼び出し形。QwenImageEditSafePipeline等、安全パイプラインを
+        # 使っている場合はここで例外(SafetyErrorなど)が送出されうる。
+        try:
+            output = self.pipe(
+                image=source,
+                prompt=prompt,
+                generator=torch.manual_seed(self.seed),
+                true_cfg_scale=self.true_cfg_scale,
+                negative_prompt=self.negative_prompt,
+                num_inference_steps=self.num_inference_steps,
+            )
+        except Exception as e:
+            reason = getattr(e, "reason", str(e))
+            return {"complied": False, "output_path": None, "refusal_reason": reason}
+
+        output_image = output.images[0]
         out_path = self.out_dir / f"edit_{self._counter:05d}.png"
-        output.save(out_path)
-
-        complied = True
-        if self.refusal_detector is not None:
-            complied = not self.refusal_detector(source, output, prompt)
-
-        return {"complied": complied, "output_path": str(out_path) if complied else None}
+        output_image.save(out_path)
+        return {"complied": True, "output_path": str(out_path)}

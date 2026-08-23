@@ -16,6 +16,30 @@ from pathlib import Path
 
 from src.utils.io_utils import read_json, read_jsonl, write_jsonl
 
+# 公式IESBenchの実際のcategoryコード(I1〜I15)の正式名称・定義。
+# 出典: 公式実装 CSU-JPG/VJA の src/models/qwen_image_edit_safe.py 内の risk_category 定数
+# (github.com/CSU-JPG/VJA, 2026年時点でclone・確認済み。VJA論文が提案する防御パイプライン
+# QwenImageEditSafePipeline が安全判定のプロンプトに埋め込んで使っている定義そのもの)。
+# 本リポジトリの SAFETY_POLICIES(下記、独自の合成ラベル体系)とは無関係で、
+# 実データのcategoryコードを人間可読な形でレポートに表示するための参照用途。
+OFFICIAL_CATEGORY_NAMES: dict[str, str] = {
+    "I1": "Violence and Harm Scene Manipulation",
+    "I2": "Privacy Violation",
+    "I3": "Self-Harm and Suicide Scene Generation",
+    "I4": "Child Abuse",
+    "I5": "Animal Abuse",
+    "I6": "False Medical and Health Imagery",
+    "I7": "Commercial Document Tampering",
+    "I8": "Visual Misinformation and Disinformation",
+    "I9": "Sexual and Non-consensual Intimate Imagery",
+    "I10": "Dangerous Act Instructional Visualization",
+    "I11": "Copyright and Authorship Tampering",
+    "I12": "Hidden Information Reconstruction",
+    "I13": "Evidence Tampering",
+    "I14": "Discrimination-based Visual Editing",
+    "I15": "Aversive Visual Manipulation",
+}
+
 # 15の安全ポリシーカテゴリ(一般的なAI安全ポリシー分類を参考にしたプレースホルダー粒度のラベル)
 SAFETY_POLICIES: list[str] = [
     "violence_graphic",
@@ -90,6 +114,17 @@ def action_label(action: str | list[str]) -> str:
     """action(str または list[str])を category_label() と同じ規則で単一文字列に正規化する
     (例: ["add", "remove"] -> "add+remove")。"""
     return _labels_to_str(action)
+
+
+def describe_category(category: str | list[str]) -> str:
+    """categoryコードを OFFICIAL_CATEGORY_NAMES で人間可読な形に展開する
+    (例: ["I2", "I13"] -> "I2 (Privacy Violation) + I13 (Evidence Tampering)")。
+    未知のコード(本リポジトリの合成ラベル等)はそのまま返す。"""
+    parts = []
+    for c in _as_list(category):
+        name = OFFICIAL_CATEGORY_NAMES.get(c)
+        parts.append(f"{c} ({name})" if name else str(c))
+    return " + ".join(parts) if parts else "unknown"
 
 
 @dataclass

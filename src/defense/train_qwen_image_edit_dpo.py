@@ -23,7 +23,7 @@
   2. `--mock` モードでは実際のモデルを一切ダウンロードせず、同じインターフェースを持つ
      ごく小さな代替モジュールで学習ループの配線(loss計算・勾配・LoRA適用)を検証する。
 
-## 1. 確認済みの実際のAPI(diffusers 0.40.0で検証)
+## 1. 確認済みの実際のAPI
 
 ```
 diffusers.QwenImageEditPipeline(
@@ -36,6 +36,43 @@ diffusers.QwenImageEditPipeline(
 QwenImageTransformer2DModel 既定config: num_layers=60, num_attention_heads=24,
     attention_head_dim=128 (hidden=3072相当), joint_attention_dim=3584
 ```
+(`pip install diffusers` でのクラス/コンフィグ確認、2026年時点)
+
+**公式実装(`CSU-JPG/VJA`)の`src/run.py`で確認した実際の生成呼び出し**(このリポジトリを
+`git clone https://github.com/CSU-JPG/VJA` して直接確認できる。同リポジトリのREADMEは
+「complete evaluation code」は本稿執筆時点でまだ未公開("in the coming weeks")と明記しており、
+公開されているのは単一画像デモの`src/run.py`と、提案手法の防御パイプライン
+`src/models/qwen_image_edit_safe.py`のみ):
+
+```python
+from diffusers import QwenImageEditPlusPipeline  # 無防御ベースラインはこちらを使用(要確認: 通常のQwenImageEditPipelineとの違いは非公開)
+pipeline = QwenImageEditPlusPipeline.from_pretrained("Qwen/Qwen-Image-Edit", torch_dtype=torch.bfloat16)
+inputs = {
+    "image": input_image, "prompt": input_prompt,
+    "generator": torch.manual_seed(0), "true_cfg_scale": 4.0,
+    "negative_prompt": " ", "num_inference_steps": 40,
+}
+try:
+    output = pipeline(**inputs)
+    output_image = output.images[0]
+except Exception as e:
+    # 公式の安全パイプライン(QwenImageEditSafePipeline)は SafetyError(message, code) を送出し、
+    # e.reason / e.judgment で拒否理由を取得できる。ベースパイプラインは通常例外を出さない想定。
+    ...
+```
+
+pinしているバージョン(`requirements.txt`): `torch==2.8.0`, `diffusers==0.36.0.dev0`,
+`transformers==4.57.1`。これらと大きく異なるバージョンでは挙動が変わる可能性がある。
+
+**公式が提案する防御(`QwenImageEditSafePipeline`)の仕組み(参考、本リポジトリにはコピーしない)**:
+`diffusers.QwenImageEditPipeline`を継承し、内部の`_get_qwen_prompt_embeds()`をオーバーライドして、
+画像+プロンプトを条件付けした同一のtext_encoder(Qwen2.5-VL)の隠れ状態(KV cache)を再利用しつつ、
+「ユーザーの真の意図」と「15の安全ポリシー(I1〜I15)のいずれかに抵触するか」をYES/NO形式で
+自己内省的に判定させ、NOと判定された場合に`SafetyError`を送出して生成を中断する
+(=training-freeなmultimodal introspective reasoning。本リポジトリの`introspective_defense.py`
+と設計思想は同じだが、公式はOCR/外部検出器ではなく実際のtext_encoder自身の隠れ状態を再利用する
+点が異なる)。公式のI1〜I15の正式な定義は`src/dataset/iesbench_schema.py::OFFICIAL_CATEGORY_NAMES`
+に転記した。
 
 `FlowMatchEulerDiscreteScheduler` を使うため、標準的な Diffusion-DPO
 (Wallace et al., 2023, "Diffusion Model Alignment Using Direct Preference Optimization")

@@ -178,8 +178,9 @@ def main() -> None:
     )
     p.add_argument("--qwen-quantization", default="4bit", choices=["4bit", "8bit", "none"])
     p.add_argument("--qwen-lora-dir", default=None, help="train_qwen_image_edit_dpo.py --save-dir で保存したDPO学習済みLoRAアダプタ(任意)")
-    p.add_argument("--qwen-steps", type=int, default=30)
+    p.add_argument("--qwen-steps", type=int, default=40, help="公式run.pyのデフォルトに合わせた値")
     p.add_argument("--qwen-cfg-scale", type=float, default=4.0)
+    p.add_argument("--qwen-seed", type=int, default=0)
     args = p.parse_args()
 
     model = None
@@ -189,7 +190,7 @@ def main() -> None:
         print(f"[情報] 実際のQwen-Image-Editをロード中(quantization={args.qwen_quantization})... 初回はモデルダウンロードで数分〜数十分かかる")
         model = QwenImageEditAdapter(
             quantization=args.qwen_quantization, lora_dir=args.qwen_lora_dir,
-            num_inference_steps=args.qwen_steps, true_cfg_scale=args.qwen_cfg_scale,
+            num_inference_steps=args.qwen_steps, true_cfg_scale=args.qwen_cfg_scale, seed=args.qwen_seed,
         )
         print("[情報] ロード完了")
 

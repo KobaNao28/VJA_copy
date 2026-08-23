@@ -84,6 +84,7 @@ VJA_copy/
 │   │   ├── metrics.py              # ASR/HS/EV/HRR
 │   │   ├── model_adapter.py        # 評価対象モデルの抽象アダプタ(合成/実モデル差し替え口)
 │   │   ├── qwen_image_edit_adapter.py  # 実際のQwen-Image-Editをrun_eval.pyに接続するアダプタ(新規, GPU要)
+│   │   ├── qwen_manual_inspection.py   # 実際のQwenで攻撃×防御を実行し入力/出力を目視確認するレポート生成(新規, GPU要)
 │   │   ├── run_eval.py             # 攻撃×防御の一括評価CLI(--qwen-image-editで実モデル評価可)
 │   │   └── vja_gap_eval.py         # テキスト攻撃 vs VJA型視覚指示攻撃での検知率比較
 │   └── utils/
@@ -158,6 +159,7 @@ python -m src.eval.run_eval --dataset ./iesbench_official --compare-all --out ou
 - [`docs/08_visual_to_visual_threat_expansion.md`](docs/08_visual_to_visual_threat_expansion.md) — Visual-to-Visual攻撃の拡張(時系列軌跡エンコーディング・GUI/エージェント・ハイジャック)の実装と実証
 - [`docs/09_resource_requirements.md`](docs/09_resource_requirements.md) — 実行環境要件(VRAM・ディスク容量・データセット・実行時間の実測値)
 - [`docs/10_official_dataset_workflow.md`](docs/10_official_dataset_workflow.md) — 公式IESBench等の取得・検証・加工・実験手順(「1から作成」と「既存データセットから加工」の使い分け)
+- [`docs/11_qwen_real_model_verification.md`](docs/11_qwen_real_model_verification.md) — 実際のQwen-Image-Editに対する攻撃・防御の実地確認手順(公式リポジトリ調査結果を含む)
 
 ## 5. ライセンス・出典
 
