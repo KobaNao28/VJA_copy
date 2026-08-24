@@ -139,9 +139,9 @@ def run(args: argparse.Namespace) -> list[dict]:
             row["qwen_refusal_reason"] = "(防御によりブロックされたため、Qwenへは送信していません)"
         else:
             result = model.edit(s["image_path"], s["prompt"])
-            row["qwen_complied"] = result["complied"]
+            row["qwen_complied"] = result["complied"]  # None = 実行エラー(GPUメモリ不足等)、モデルの安全性判断ではない
             row["qwen_output_path"] = result.get("output_path")
-            row["qwen_refusal_reason"] = result.get("refusal_reason", "")
+            row["qwen_refusal_reason"] = result.get("refusal_reason") or result.get("error", "")
         results.append(row)
     return results
 
@@ -162,6 +162,10 @@ def render_html(results: list[dict], out_path: Path) -> None:
 
         if r["defense_blocked"]:
             status, color = "BLOCKED_BY_DEFENSE", "#2e7d32"
+        elif r["qwen_complied"] is None:
+            # モデルの安全性判断とは無関係の実行エラー(GPUメモリ不足等)。REFUSED_BY_MODELと
+            # 混同しないよう別の色にする(このエントリは有害/無害の評価ができていない)。
+            status, color = "ERROR (not evaluated)", "#f9a825"
         elif not r["qwen_complied"]:
             status, color = "REFUSED_BY_MODEL", "#1565c0"
         else:
@@ -187,8 +191,9 @@ def render_html(results: list[dict], out_path: Path) -> None:
 
     n_total = len(results)
     n_blocked = sum(1 for r in results if r["defense_blocked"])
-    n_refused = sum(1 for r in results if not r["defense_blocked"] and not r["qwen_complied"])
-    n_complied = n_total - n_blocked - n_refused
+    n_errored = sum(1 for r in results if not r["defense_blocked"] and r["qwen_complied"] is None)
+    n_refused = sum(1 for r in results if not r["defense_blocked"] and r["qwen_complied"] is False)
+    n_complied = sum(1 for r in results if not r["defense_blocked"] and r["qwen_complied"] is True)
 
     html_doc = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>Qwen-Image-Edit 目視確認レポート</title>
@@ -204,11 +209,12 @@ body {{ font-family: sans-serif; background:#111; color:#eee; margin:0; padding:
 </style></head><body>
 <h1>Qwen-Image-Edit 目視確認レポート</h1>
 <div class="summary">
-  n={n_total} / 防御でブロック={n_blocked} / 防御通過だがQwenが拒否={n_refused} / 突破(編集実行)={n_complied}
+  n={n_total} / 防御でブロック={n_blocked} / 防御通過だがQwenが拒否={n_refused} / 突破(編集実行)={n_complied} / 実行エラー(未評価)={n_errored}
   <br>凡例:
   <span style="color:#2e7d32">緑=防御でブロック</span> /
   <span style="color:#1565c0">青=防御通過もQwenが拒否</span> /
-  <span style="color:#c62828">赤=突破(要目視確認: 実際に有害な編集になっているか)</span>
+  <span style="color:#c62828">赤=突破(要目視確認: 実際に有害な編集になっているか)</span> /
+  <span style="color:#f9a825">黄=実行エラー(GPUメモリ不足等、モデルの安全性判断ではない・未評価)</span>
 </div>
 {''.join(cards)}
 </body></html>"""
@@ -247,8 +253,9 @@ def main() -> None:
 
     n_total = len(results)
     n_blocked = sum(1 for r in results if r["defense_blocked"])
-    n_complied = sum(1 for r in results if not r["defense_blocked"] and r["qwen_complied"])
-    print(f"完了: n={n_total} 防御ブロック={n_blocked} 突破(編集実行)={n_complied}")
+    n_complied = sum(1 for r in results if not r["defense_blocked"] and r["qwen_complied"] is True)
+    n_errored = sum(1 for r in results if not r["defense_blocked"] and r["qwen_complied"] is None)
+    print(f"完了: n={n_total} 防御ブロック={n_blocked} 突破(編集実行)={n_complied} 実行エラー(未評価)={n_errored}")
     print(f"HTMLレポート -> {out_dir / 'report.html'} (ブラウザ/Colabで開いて目視確認してください)")
     print(f"JSONレポート -> {out_dir / 'report.json'}")
 

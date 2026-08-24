@@ -120,6 +120,14 @@ class QwenImageEditAdapter(ModelAdapter):
                 negative_prompt=self.negative_prompt,
                 num_inference_steps=self.num_inference_steps,
             )
+        except torch.cuda.OutOfMemoryError as e:
+            # GPUメモリ不足はモデルの安全性判断とは無関係のインフラ起因のエラーであり、
+            # 「モデルが安全に拒否した(complied=False)」として扱うとASR/HS等の指標が
+            # 不正確になる(実際には評価できていないだけなのに「安全」側の件として
+            # 数えてしまう)。complied=Noneで「評価不能」を明示し、呼び出し側でスキップさせる。
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return {"complied": None, "output_path": None, "error": f"cuda_oom: {e}"}
         except Exception as e:
             reason = getattr(e, "reason", str(e))
             return {"complied": False, "output_path": None, "refusal_reason": reason}

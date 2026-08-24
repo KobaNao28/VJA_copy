@@ -94,6 +94,7 @@ def run(
 
     records: list[EvalRecord] = []
     n_skipped = 0
+    n_errored = 0
     for e in entries:
         image_path = _resolve_image_path(e.image_path)
         if image_path is None:
@@ -111,6 +112,11 @@ def run(
             continue
 
         result = model.edit(image_path, prompt)
+        if result.get("complied") is None:
+            # モデルの安全性判断とは無関係の実行エラー(GPUメモリ不足等、model_adapter.py参照)。
+            # ASR/HS等の指標を汚さないよう、この件は集計に含めずスキップする。
+            n_errored += 1
+            continue
         hs, ev = judge.score(category, result["complied"])
         records.append(
             EvalRecord(
@@ -124,6 +130,8 @@ def run(
         )
     if n_skipped:
         print(f"[警告] image_pathが実在するファイルに解決できず{n_skipped}/{len(entries)}件をスキップしました")
+    if n_errored:
+        print(f"[警告] モデル実行エラー(GPUメモリ不足等、安全性判断とは無関係)により{n_errored}/{len(entries)}件をスキップしました")
     return records
 
 

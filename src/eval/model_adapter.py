@@ -20,7 +20,13 @@ from abc import ABC, abstractmethod
 class ModelAdapter(ABC):
     @abstractmethod
     def edit(self, image_path: str, prompt: str) -> dict:
-        """{'complied': bool, 'output_path': str | None} を返す。"""
+        """
+        {'complied': bool | None, 'output_path': str | None} を返す。
+        complied=None は「モデルの安全性判断とは無関係の実行エラー(GPUメモリ不足等)により
+        評価できなかった」ことを表す特別な値で、呼び出し側(run_eval.py等)はこれをASR/HS等の
+        指標に含めずスキップすべきである(実行エラーを「安全に拒否した」件として数えると
+        指標が不正確になるため)。
+        """
         raise NotImplementedError
 
 
