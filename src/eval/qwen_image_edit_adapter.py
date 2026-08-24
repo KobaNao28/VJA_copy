@@ -68,6 +68,7 @@ class QwenImageEditAdapter(ModelAdapter):
         negative_prompt: str = " ",
         seed: int = 0,
         out_dir: str = "outputs/qwen_image_edit_eval",
+        offload_text_encoder: bool = True,
         pipe=None,
     ):
         if pipe is not None:
@@ -78,7 +79,13 @@ class QwenImageEditAdapter(ModelAdapter):
             # gradient checkpointingは逆伝播(学習)時のVRAM節約用の最適化であり、
             # 推論のみのこの用途では不要(diffusers/peftバージョン差異による
             # gradient_checkpointing_enable系の非互換も推論経路では踏まずに済む)。
-            config = QwenImageEditDPOConfig(quantization=quantization, gradient_checkpointing=False)
+            # offload_text_encoder=True(既定)だとenable_model_cpu_offload()が進捗表示なしで
+            # 数分かかることがある(train_qwen_image_edit_dpo.py::load_real_pipeline()参照)。
+            # GPUのVRAMに余裕がある場合は False にするとこのステップ自体をスキップできる。
+            config = QwenImageEditDPOConfig(
+                quantization=quantization, gradient_checkpointing=False,
+                offload_text_encoder=offload_text_encoder,
+            )
             self.pipe = load_real_pipeline(config)
             if lora_dir:
                 # train_qwen_image_edit_dpo.py --save-dir で保存したLoRAアダプタ(安全アライメント後の重み)を適用する。

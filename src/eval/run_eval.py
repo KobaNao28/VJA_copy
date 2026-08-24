@@ -181,6 +181,11 @@ def main() -> None:
     p.add_argument("--qwen-steps", type=int, default=40, help="公式run.pyのデフォルトに合わせた値")
     p.add_argument("--qwen-cfg-scale", type=float, default=4.0)
     p.add_argument("--qwen-seed", type=int, default=0)
+    p.add_argument(
+        "--qwen-no-cpu-offload", action="store_true",
+        help="enable_model_cpu_offload()をスキップする(進捗表示なしで数分かかる処理を回避)。"
+             "GPUのVRAMに余裕がある場合のみ指定すること",
+    )
     args = p.parse_args()
 
     model = None
@@ -191,6 +196,7 @@ def main() -> None:
         model = QwenImageEditAdapter(
             quantization=args.qwen_quantization, lora_dir=args.qwen_lora_dir,
             num_inference_steps=args.qwen_steps, true_cfg_scale=args.qwen_cfg_scale, seed=args.qwen_seed,
+            offload_text_encoder=not args.qwen_no_cpu_offload,
         )
         print("[情報] ロード完了")
 

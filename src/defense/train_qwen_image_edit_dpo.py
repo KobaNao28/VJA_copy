@@ -222,7 +222,16 @@ def load_real_pipeline(config: QwenImageEditDPOConfig):
     pipe.text_encoder.requires_grad_(False)
     pipe.vae.requires_grad_(False)
     if config.offload_text_encoder:
-        pipe.enable_model_cpu_offload()  # diffusers標準のオフロード機構(text_encoder/vaeを必要時のみGPUへ)
+        # diffusers標準のオフロード機構(text_encoder/vaeを必要時のみGPUへ)。
+        # 内部でtransformer/text_encoder/vae(合計数十GB規模)をCPU<->GPU間で配置し直すため、
+        # プログレスバー等の出力が一切無いまま数分かかることがある(一見フリーズしたように
+        # 見えるが正常動作)。Colab等でここが「止まっている」ように見えたら、慌てて中断せず
+        # 数分待つこと。GPUのVRAMに余裕がある場合は QwenImageEditDPOConfig(offload_text_encoder=False)
+        # (run_eval.py/qwen_manual_inspection.pyの--qwen-no-cpu-offload)でこのステップ自体を
+        # スキップでき、その方が高速な場合もある。
+        print("[情報] CPU offloadを設定中(進捗表示なしで数分かかることがあります。フリーズではありません)...")
+        pipe.enable_model_cpu_offload()
+        print("[情報] CPU offload設定完了")
     return pipe
 
 

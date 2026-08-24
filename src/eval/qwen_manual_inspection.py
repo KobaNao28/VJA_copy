@@ -99,6 +99,7 @@ def run(args: argparse.Namespace) -> list[dict]:
         true_cfg_scale=args.qwen_cfg_scale,
         seed=args.qwen_seed,
         out_dir=str(Path(args.out_dir) / "qwen_outputs"),
+        offload_text_encoder=not args.qwen_no_cpu_offload,
     )
     print("[情報] ロード完了")
 
@@ -220,6 +221,11 @@ def main() -> None:
     p.add_argument("--qwen-steps", type=int, default=40)
     p.add_argument("--qwen-cfg-scale", type=float, default=4.0)
     p.add_argument("--qwen-seed", type=int, default=0)
+    p.add_argument(
+        "--qwen-no-cpu-offload", action="store_true",
+        help="enable_model_cpu_offload()をスキップする(進捗表示なしで数分かかる処理を回避)。"
+             "GPUのVRAMに余裕がある場合のみ指定すること",
+    )
     p.add_argument("--out-dir", default="outputs/qwen_manual_inspection")
     args = p.parse_args()
 
