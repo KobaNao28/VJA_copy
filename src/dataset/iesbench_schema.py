@@ -219,6 +219,29 @@ def _find_annotation_file(dir_path: Path) -> Path:
     )
 
 
+# 公式配布物で、annotationの image-path フィールドが参照するフォルダ名("image/...")と
+# 実際に展開されるフォルダ名("img/...")が食い違っている実例を確認した
+# (image_id=1のimage-pathは"image/0001.png"だが、実際の展開先は"img/0001.png")。
+# 単純な base_dir / raw_image_path が失敗した場合、既知のフォルダ名候補で総当たりする。
+_IMAGE_DIR_ALIASES = ["img", "image", "images"]
+
+
+def _resolve_relative_image_path(base_dir: Path, raw_image_path: str) -> str:
+    candidate = base_dir / raw_image_path
+    if candidate.exists():
+        return str(candidate)
+
+    parts = Path(raw_image_path).parts
+    if len(parts) > 1:
+        tail = Path(*parts[1:])  # 先頭の(誤った)フォルダ名を取り除いたファイル名部分
+        for alias in _IMAGE_DIR_ALIASES:
+            alt_candidate = base_dir / alias / tail
+            if alt_candidate.exists():
+                return str(alt_candidate)
+
+    return raw_image_path  # 解決できなければ元の値のまま返す(呼び出し側でスキップされる想定)
+
+
 def load_entries(path: str | Path) -> list[IESBenchEntry]:
     path = Path(path)
     if path.is_dir():
@@ -241,9 +264,7 @@ def load_entries(path: str | Path) -> list[IESBenchEntry]:
         raw_image_path = row.get("image_path", row.get("image-path", ""))
         resolved_image_path = raw_image_path
         if raw_image_path and not Path(raw_image_path).is_absolute():
-            candidate = base_dir / raw_image_path
-            if candidate.exists():
-                resolved_image_path = str(candidate)
+            resolved_image_path = _resolve_relative_image_path(base_dir, raw_image_path)
         entries.append(
             IESBenchEntry(
                 image_id=row.get("image_id", ""),
