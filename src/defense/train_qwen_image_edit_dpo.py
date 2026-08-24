@@ -209,6 +209,30 @@ def load_real_pipeline(config: QwenImageEditDPOConfig, apply_lora: bool = True):
         config.model_name, subfolder="transformer", quantization_config=quant_config,
         torch_dtype=torch.bfloat16,
     )
+
+    # text_encoder(Qwen2.5-VL-7B)はbf16のままだと単体で約14GBあり、16GB級のGPUでは
+    # 量子化済みtransformerと合わせてもVRAMが不足しCUDA OOMになることを実機で確認した。
+    # transformerと同様に量子化してロードする。
+    # 誠実な注記: サブフォルダ名"text_encoder"はtransformerと同じ命名規則
+    # (diffusersパイプラインの慣例)を仮定した未検証の推測であり、実際に確認できていない。
+    # 失敗した場合はパイプライン既定の非量子化ロードにフォールバックする(VRAM使用量が
+    # 増えるだけで、動作自体は従来通り)。
+    text_encoder = None
+    if quant_config is not None:
+        try:
+            from transformers import Qwen2_5_VLForConditionalGeneration
+
+            text_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                config.model_name, subfolder="text_encoder",
+                quantization_config=quant_config, torch_dtype=torch.bfloat16,
+            )
+        except Exception as e:
+            print(
+                f"[警告] text_encoderの量子化ロードに失敗したため非量子化でロードします"
+                f"(VRAM使用量が増えます): {e}"
+            )
+            text_encoder = None
+
     if apply_lora:
         from peft import LoraConfig, get_peft_model
 
@@ -232,10 +256,11 @@ def load_real_pipeline(config: QwenImageEditDPOConfig, apply_lora: bool = True):
                 "VRAM使用量は増えますが、無効のまま学習/推論を継続します。"
             )
 
-    pipe = QwenImageEditPipeline.from_pretrained(
-        config.model_name, transformer=transformer, torch_dtype=torch.bfloat16,
-    )
-    # text_encoder(Qwen2.5-VL, 単体で7-8Bパラメータ級・bf16で約14GB)は推論専用のためgradient不要
+    pipe_kwargs = {"transformer": transformer, "torch_dtype": torch.bfloat16}
+    if text_encoder is not None:
+        pipe_kwargs["text_encoder"] = text_encoder
+    pipe = QwenImageEditPipeline.from_pretrained(config.model_name, **pipe_kwargs)
+    # text_encoder(Qwen2.5-VL, 単体で7-8Bパラメータ級・非量子化bf16なら約14GB)は推論専用のためgradient不要
     pipe.text_encoder.requires_grad_(False)
     pipe.vae.requires_grad_(False)
 
