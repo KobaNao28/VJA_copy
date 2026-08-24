@@ -181,9 +181,18 @@ def flow_matching_dpo_loss(
 # --------------------------------------------------------------------------------------
 # 実モデルのロード(ユーザー自身のHuggingFaceアクセス可能な環境で実行する想定)
 # --------------------------------------------------------------------------------------
-def load_real_pipeline(config: QwenImageEditDPOConfig):
+def load_real_pipeline(config: QwenImageEditDPOConfig, apply_lora: bool = True):
+    """
+    apply_lora=True(既定): DPO学習用に transformer を peft.PeftModel でラップする
+    (train_qwen_image_edit_dpo.pyの学習ループはこちらを使う)。
+    apply_lora=False: peftラップを行わず、生の QwenImageTransformer2DModel をそのまま使う。
+    LoRAアダプタを適用しないベースライン評価(QwenImageEditAdapterでlora_dir未指定時)では
+    こちらを使う。peft.PeftModelでラップした状態のtransformerをdiffusersパイプラインに渡すと、
+    (a) 型チェック警告(Expected types for transformer: ... got PeftModel、無害)に加えて、
+    (b) 実機で enable_model_cpu_offload()/enable_sequential_cpu_offload() が進まなくなる
+    事例を確認しており、LoRAを使わないなら最初からラップしない方が安全。
+    """
     from diffusers import QwenImageEditPipeline, QwenImageTransformer2DModel
-    from peft import LoraConfig, get_peft_model
     from transformers import BitsAndBytesConfig
 
     quant_config = None
@@ -200,8 +209,11 @@ def load_real_pipeline(config: QwenImageEditDPOConfig):
         config.model_name, subfolder="transformer", quantization_config=quant_config,
         torch_dtype=torch.bfloat16,
     )
-    lora_config = LoraConfig(r=config.lora_rank, lora_alpha=config.lora_alpha, target_modules="all-linear")
-    transformer = get_peft_model(transformer, lora_config)
+    if apply_lora:
+        from peft import LoraConfig, get_peft_model
+
+        lora_config = LoraConfig(r=config.lora_rank, lora_alpha=config.lora_alpha, target_modules="all-linear")
+        transformer = get_peft_model(transformer, lora_config)
     if config.gradient_checkpointing:
         # diffusersのModelMixin系は transformers.PreTrainedModel と異なり
         # enable_gradient_checkpointing() という名前を使う(gradient_checkpointing_enable()ではない)。

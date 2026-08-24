@@ -87,7 +87,11 @@ class QwenImageEditAdapter(ModelAdapter):
                 quantization=quantization, gradient_checkpointing=False,
                 offload_mode=offload_mode,
             )
-            self.pipe = load_real_pipeline(config)
+            # lora_dir未指定(=ベースライン評価、DPO学習済みLoRAを使わない)なら、
+            # そもそもpeft.PeftModelでラップしない(load_real_pipeline()のapply_lora参照)。
+            # 不要なラップを避けることで型不一致の警告と、それに起因すると見られる
+            # CPU offload処理の停止の両方を回避できる。
+            self.pipe = load_real_pipeline(config, apply_lora=lora_dir is not None)
             if lora_dir:
                 # train_qwen_image_edit_dpo.py --save-dir で保存したLoRAアダプタ(安全アライメント後の重み)を適用する。
                 self.pipe.transformer.load_adapter(lora_dir, adapter_name="dpo_safety")
