@@ -81,6 +81,14 @@ def run(args: argparse.Namespace) -> list[dict]:
     samples = load_samples(args.source, args.source_type, args.n_samples, args.seed)
     print(f"対象サンプル数: {len(samples)}")
 
+    # image_pathが実在するファイルに解決できないサンプルは除外する(公式データの一部エントリで
+    # 発生することを確認済み)。無関係な代用画像で埋めると実モデルの実出力として誤って
+    # 記録されてしまうため、スキップして件数を報告する。
+    n_before = len(samples)
+    samples = [s for s in samples if Path(s["image_path"]).exists()]
+    if len(samples) < n_before:
+        print(f"[警告] image_pathが実在するファイルに解決できず{n_before - len(samples)}/{n_before}件をスキップしました")
+
     guard_model = load_guard_model(args.guard_ckpt) if args.defense in ("guard_classifier", "unified") else None
     introspective = IntrospectiveDefense() if args.defense in ("introspective", "unified") else None
     unified = (
