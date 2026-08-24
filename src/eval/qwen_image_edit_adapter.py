@@ -68,7 +68,7 @@ class QwenImageEditAdapter(ModelAdapter):
         negative_prompt: str = " ",
         seed: int = 0,
         out_dir: str = "outputs/qwen_image_edit_eval",
-        offload_text_encoder: bool = True,
+        offload_mode: str = "model",
         pipe=None,
     ):
         if pipe is not None:
@@ -79,12 +79,13 @@ class QwenImageEditAdapter(ModelAdapter):
             # gradient checkpointingは逆伝播(学習)時のVRAM節約用の最適化であり、
             # 推論のみのこの用途では不要(diffusers/peftバージョン差異による
             # gradient_checkpointing_enable系の非互換も推論経路では踏まずに済む)。
-            # offload_text_encoder=True(既定)だとenable_model_cpu_offload()が進捗表示なしで
-            # 数分かかることがある(train_qwen_image_edit_dpo.py::load_real_pipeline()参照)。
-            # GPUのVRAMに余裕がある場合は False にするとこのステップ自体をスキップできる。
+            # offload_mode: "model"(既定, 通常は高速だがpeft.PeftModelとの組み合わせで
+            # 停止したように見える事例あり) / "sequential"(低VRAM環境向け、遅いが安定)/
+            # "none"(GPU VRAMに全モデルが載る場合のみ。16GB級のGPUではまず入らない
+            # ―text_encoderだけでbf16約14GB、transformerが4bit量子化でも約10GB前後)。
             config = QwenImageEditDPOConfig(
                 quantization=quantization, gradient_checkpointing=False,
-                offload_text_encoder=offload_text_encoder,
+                offload_mode=offload_mode,
             )
             self.pipe = load_real_pipeline(config)
             if lora_dir:

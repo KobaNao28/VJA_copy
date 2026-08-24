@@ -138,7 +138,12 @@ class QwenImageEditDPOConfig:
     lr: float = 1e-4
     beta: float = 2000.0              # Diffusion-DPOはtoken単位DPOよりbetaを大きく取るのが通例
     gradient_checkpointing: bool = True
-    offload_text_encoder: bool = True
+    # "model": enable_model_cpu_offload()(粗粒度、通常は高速だが peft.PeftModel でラップした
+    #   transformerとの組み合わせで極端に遅い/停止したように見える事例を確認)。
+    # "sequential": enable_sequential_cpu_offload()(層単位の細粒度オフロード。低VRAM環境向けの
+    #   標準的な選択肢で、"model"より低いVRAMで動く可能性が高いが推論は遅くなる)。
+    # "none": オフロードなし(GPU VRAMに全モデルが載る場合のみ)。
+    offload_mode: str = "model"
     num_train_timesteps: int = 1000
     epochs: int = 1
     seed: int = 42
@@ -218,20 +223,28 @@ def load_real_pipeline(config: QwenImageEditDPOConfig):
     pipe = QwenImageEditPipeline.from_pretrained(
         config.model_name, transformer=transformer, torch_dtype=torch.bfloat16,
     )
-    # text_encoder(Qwen2.5-VL, 単体で7-8Bパラメータ級)は推論専用のためgradient不要
+    # text_encoder(Qwen2.5-VL, 単体で7-8Bパラメータ級・bf16で約14GB)は推論専用のためgradient不要
     pipe.text_encoder.requires_grad_(False)
     pipe.vae.requires_grad_(False)
-    if config.offload_text_encoder:
-        # diffusers標準のオフロード機構(text_encoder/vaeを必要時のみGPUへ)。
-        # 内部でtransformer/text_encoder/vae(合計数十GB規模)をCPU<->GPU間で配置し直すため、
-        # プログレスバー等の出力が一切無いまま数分かかることがある(一見フリーズしたように
-        # 見えるが正常動作)。Colab等でここが「止まっている」ように見えたら、慌てて中断せず
-        # 数分待つこと。GPUのVRAMに余裕がある場合は QwenImageEditDPOConfig(offload_text_encoder=False)
-        # (run_eval.py/qwen_manual_inspection.pyの--qwen-no-cpu-offload)でこのステップ自体を
-        # スキップでき、その方が高速な場合もある。
-        print("[情報] CPU offloadを設定中(進捗表示なしで数分かかることがあります。フリーズではありません)...")
+
+    if config.offload_mode == "model":
+        # diffusers標準の粗粒度オフロード(text_encoder/vae/transformerをまとめて必要時のみGPUへ)。
+        # 内部でCPU<->GPU間の配置し直しが発生するため、プログレスバー等の出力が一切無いまま
+        # 数分かかることがある(一見フリーズしたように見えるが正常動作のはず)。
+        # ただし peft.PeftModel でラップしたtransformerとの組み合わせでは、accelerateの
+        # フック登録処理が実質的に進まなくなる(数分待っても完了しない)事例を確認している。
+        # その場合は QwenImageEditDPOConfig(offload_mode="sequential") を使うこと
+        # (低VRAM環境向けの標準的な代替手段、より細粒度で低メモリだが推論は遅くなる)。
+        print("[情報] CPU offload(model)を設定中(進捗表示なしで数分かかることがあります)...")
         pipe.enable_model_cpu_offload()
         print("[情報] CPU offload設定完了")
+    elif config.offload_mode == "sequential":
+        print("[情報] CPU offload(sequential, 低VRAM向け)を設定中...")
+        pipe.enable_sequential_cpu_offload()
+        print("[情報] CPU offload設定完了(推論は enable_model_cpu_offload より遅くなります)")
+    elif config.offload_mode != "none":
+        raise ValueError(f"未知のoffload_mode: {config.offload_mode!r} (model/sequential/noneのいずれか)")
+
     return pipe
 
 
